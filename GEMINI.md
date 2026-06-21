@@ -29,7 +29,7 @@ uv run pre-commit install
 ## Development Phases
 
 ### Phase 1: Understand Requirements
-Before writing any code, understand the project's requirements, constraints, and success criteria. Read the technical design in `analysis_results.md` and `a11y-forge-build-spec (1).md` if necessary.
+Before writing any code, understand the project's requirements, constraints, and success criteria. Read the technical design in docs/ARCHITECTURE.md and the implementation checklist in IMPLEMENTATION_PLAN.md if necessary.
 
 ### Phase 2: Build and Implement
 Implement agent logic in `app/`. Use `agents-cli playground` for interactive testing. Iterate based on user feedback.
