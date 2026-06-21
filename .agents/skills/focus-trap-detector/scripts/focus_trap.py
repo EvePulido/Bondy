@@ -6,7 +6,11 @@ import tempfile
 from playwright.sync_api import sync_playwright
 
 
-def detect_focus_trap(content):
+def detect_focus_trap(content: str) -> dict:
+    """
+    Simulates tab navigation using Playwright to detect if focus becomes
+    trapped within a subset of elements (modal dialog, dropdown menu, etc.).
+    """
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         page = browser.new_page()
@@ -25,7 +29,7 @@ def detect_focus_trap(content):
 
         focus_sequence = []
 
-        # Simular 30 tabs
+        # Simulate 30 tabs
         for _ in range(30):
             page.keyboard.press("Tab")
 
@@ -48,7 +52,7 @@ def detect_focus_trap(content):
             except OSError:
                 pass
 
-        # Detectar ciclo
+        # Detect cycle
         trap = False
         unique_elements = (
             set(focus_sequence[-10:])
@@ -56,19 +60,18 @@ def detect_focus_trap(content):
             else set(focus_sequence)
         )
 
-        # Si de los últimos 10 tabs, el foco está oscilando entre un conjunto muy pequeño de elementos (2 o 3) y no sale de ahí.
+        # If after 30 tabs the focus keeps cycling between a very small set of elements (<= 3)
         if (
             len(focus_sequence) >= 30
             and len(unique_elements) > 0
             and len(unique_elements) <= 3
         ):
-            # Hay que verificar si es realmente un bucle. Para el mock, asumimos que si cicla en < 3 elementos en los últimos 10 tabs, es trampa.
             trap = True
 
         return {
-            "trampa_detectada": trap,
-            "selectores_involucrados": list(unique_elements),
-            "num_pulsaciones_sin_salida": 30 if trap else 0,
+            "trap_detected": trap,
+            "involved_selectors": list(unique_elements),
+            "num_presses_without_exit": 30 if trap else 0,
         }
 
 

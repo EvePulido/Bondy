@@ -4,14 +4,14 @@ description: |
   Determines if a web page image is purely decorative (i.e. serves only aesthetic purposes and provides no unique information) and should therefore be marked with alt="" instead of carrying a redundant description. Use this tool when analyzing image quality and deciding if a descriptive alt text is necessary based on the visual content and surrounding text.
 ---
 
-## Instrucciones
+## Instructions
 
-1. Recibe la URL o bytes de la imagen (`imagen_url_o_bytes`) y su `contexto_dom` (texto/headings circundantes).
-2. Analiza el contenido visual de la imagen frente a la información textual adyacente.
-3. Evalúa si la imagen provee información adicional, funcionalidad o contexto vital (ver `references/decorativa_vs_informativa.md`).
-4. Devuelve si la imagen es puramente decorativa (`es_decorativa`) y una justificación detallada de acuerdo al contrato de la Sección 4.8.
-5. Modelo: gemini-3.5-flash (confirmar disponibilidad vigente antes de implementar).
+1. Receives the URL or bytes of the image (`image_url_or_bytes`) and its surrounding DOM context (`dom_context` like adjacent text and headings).
+2. Analyces the visual content of the image against the adjacent textual information.
+3. Evaluates if the image provides any unique additional information, functionality, or vital context.
+4. Returns whether the image is purely decorative (`is_decorative`) and a detailed justification: `{ "is_decorative": bool, "justification": string }`.
+5. AI Model: gemini-3.5-flash.
 
-## Cuándo NO activar este skill
+## When NOT to activate this skill
 
-- Si el elemento es un ícono o imagen utilizado como único contenido dentro de un enlace o botón interactivo (eso la hace funcional, no decorativa).
+- If the element is an icon or image used as the sole content within an interactive link or button (which makes it functional, not decorative).

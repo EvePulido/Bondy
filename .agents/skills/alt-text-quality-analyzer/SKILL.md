@@ -4,16 +4,16 @@ description: |
   Analyzes a web page image against its current alt attribute text using multimodal vision models. Evaluates if the alt text accurately describes the image context, checking if it is empty, generic, or mismatched with the visual content. Use this to verify descriptive quality of image alt tags (WCAG 1.1.1).
 ---
 
-## Instrucciones
+## Instructions
 
-1. Recibe la URL o bytes de la imagen (`imagen_url_o_bytes`), el alt actual (`alt_actual`), y el contexto DOM (`contexto_dom`).
-2. Utiliza visión por computadora para analizar la imagen.
-3. Compara el contenido de la imagen con el atributo `alt_actual`.
-4. Evalúa la calidad según las directrices WCAG 1.1.1 (ver `references/wcag_1_1_1.md`).
-5. Devuelve un veredicto (`buena`, `deficiente`, `ausente`, `posible_redundancia`), una explicación detallada, y una sugerencia de fix de acuerdo a la Sección 4.7 de la spec técnica.
-6. Modelo: gemini-3.5-flash (confirmar disponibilidad vigente antes de implementar).
+1. Receives the URL or bytes of the image (`image_url_or_bytes`), the current alt text (`current_alt`), and the surrounding DOM context (`dom_context`).
+2. Uses computer vision to analyze the image content.
+3. Compares the image content with the `current_alt` attribute.
+4. Evaluates the description quality based on WCAG 1.1.1 guidelines.
+5. Returns a verdict (`good`, `poor`, `missing`, `redundant`), a detailed explanation, and a suggested fix: `{ "verdict": string, "explanation": string, "suggested_fix": string|null }`.
+6. AI Model: gemini-3.5-flash.
 
-## Cuándo NO activar este skill
+## When NOT to activate this skill
 
-- Si el elemento evaluado no es una etiqueta `<img>` o no tiene un rol de imagen.
-- Si la imagen ha sido previamente clasificada definitivamente como puramente decorativa.
+- If the element under evaluation is not an `<img>` tag or does not represent an image role.
+- If the image has already been classified as purely decorative.

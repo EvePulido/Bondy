@@ -8,7 +8,7 @@ def parse_color(c):
         if len(c) == 3:
             c = "".join([x * 2 for x in c])
         return tuple(int(c[i : i + 2], 16) for i in (0, 2, 4))
-    # Para simplificar el demo asumimos formato rgb(R, G, B)
+    # For simplicity of the demo, we assume rgb(R, G, B) format
     if c.startswith("rgb"):
         parts = c.replace("rgba(", "").replace("rgb(", "").replace(")", "").split(",")
         if len(parts) >= 3:

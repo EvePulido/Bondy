@@ -4,15 +4,15 @@ description: |
   Calculates the color contrast ratio between text (foreground) and its background element for all visible text nodes in a DOM snapshot to verify legibility. Evaluates if they satisfy the WCAG 2 AA minimum ratio limits (4.5:1 for normal text, 3.0:1 for large text). Use this tool for checking color accessibility.
 ---
 
-## Instrucciones
+## Instructions
 
-1. Recibe el `dom_snapshot` serializado por Playwright.
-2. Para cada nodo de texto visible, extrae color de texto (`fg`) y color de fondo efectivo (`bg`), resolviendo transparencias si las hay.
-3. Ejecuta `scripts/contrast.py fg_hex bg_hex` para obtener el ratio.
-4. Determina el umbral requerido según tamaño/peso de fuente (ver `references/` si existe).
-5. Devuelve la lista de `issues` según el contrato de la Sección 4.1 de la spec técnica.
+1. Receives the `dom_snapshot` serialized from Playwright.
+2. For each visible text node, extracts the text color (`fg`) and the effective background color (`bg`), resolving transparencies if present.
+3. Executes `scripts/contrast.py fg_hex bg_hex` to obtain the contrast ratio.
+4. Determines the required threshold depending on the font size/weight.
+5. Returns a list of `issues` according to the technical contract: `{ "issues": list }` where each issue contains: `{ "selector": string, "contrast_ratio": float, "passes_wcag": bool }`.
 
-## Cuándo NO activar este skill
+## When NOT to activate this skill
 
-- Si el nodo no contiene texto visible (solo íconos, imágenes, bordes).
-- Si el texto está oculto (`display:none`, `visibility:hidden`, `aria-hidden="true"`).
+- If the node does not contain visible text (only icons, images, borders).
+- If the text is hidden (`display:none`, `visibility:hidden`, `aria-hidden="true"`).

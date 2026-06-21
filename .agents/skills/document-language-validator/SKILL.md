@@ -4,13 +4,13 @@ description: |
   Checks if the HTML document's root tag (<html>) has a valid lang attribute conforming to BCP 47 (e.g., 'es', 'en-US') to ensure screen readers parse correct voice outputs. Use this as part of base document structure audits (WCAG 3.1.1).
 ---
 
-## Instrucciones
+## Instructions
 
-1. Recibe el `html_root_tag` en formato string.
-2. Ejecuta el script de Python `scripts/check_lang.py` pasándole el HTML por la entrada estándar (stdin).
-3. Devuelve el objeto `issue` según el contrato técnico: `{ presente: bool, valor: string|null, valido: bool }`.
+1. Receives the `html_root_tag` as a string parameter.
+2. Executes the Python script `scripts/check_lang.py` passing the HTML content via standard input (stdin).
+3. Returns the `issue` object according to the technical contract: `{ "present": bool, "value": string|null, "valid": bool }`.
 
-## Cuándo NO activar este skill
+## When NOT to activate this skill
 
-- Si no se tiene acceso al código HTML de la página.
-- Si la auditoría no incluye la revisión del documento raíz (es decir, solo se está evaluando un componente parcial sin la etiqueta `<html>`).
+- If you do not have access to the page's HTML code.
+- If the audit does not include a review of the root document (e.g., you are only evaluating a partial component without the `<html>` tag).

@@ -3,17 +3,20 @@ import re
 import sys
 
 
-def check_form_labels(html_str):
+def check_form_labels(html_str: str) -> list:
+    """
+    Audits form elements and checks for association with an accessible label.
+    """
     results = []
 
-    # Encontrar todos los input, select, textarea
+    # Find all input, select, textarea tags
     elements = re.finditer(r"<(input|select|textarea)([^>]*)>", html_str, re.IGNORECASE)
 
     for match in elements:
         tag_name = match.group(1).lower()
         attrs = match.group(2)
 
-        # Ignorar tipos que no requieren label
+        # Ignore input types that do not require labels
         type_match = re.search(r'type\s*=\s*["\']([^"\']+)["\']', attrs, re.IGNORECASE)
         input_type = type_match.group(1).lower() if type_match else "text"
 
@@ -29,11 +32,11 @@ def check_form_labels(html_str):
         has_label = False
         method = None
 
-        # aria-label
+        # Check aria-label
         if re.search(r'aria-label\s*=\s*["\']([^"\']+)["\']', attrs, re.IGNORECASE):
             has_label = True
             method = "aria-label"
-        # aria-labelledby
+        # Check aria-labelledby
         elif re.search(
             r'aria-labelledby\s*=\s*["\']([^"\']+)["\']', attrs, re.IGNORECASE
         ):
@@ -43,7 +46,7 @@ def check_form_labels(html_str):
         id_match = re.search(r'id\s*=\s*["\']([^"\']+)["\']', attrs, re.IGNORECASE)
         input_id = id_match.group(1) if id_match else None
 
-        # <label for="...">
+        # Check <label for="...">
         if not has_label and input_id:
             label_for_pattern = (
                 f"<label[^>]*for\\s*=\\s*[\"']{re.escape(input_id)}[\"'][^>]*>"
@@ -52,10 +55,8 @@ def check_form_labels(html_str):
                 has_label = True
                 method = "label[for]"
 
-        # Implicit <label> wrapping - comprobación básica para el mock
+        # Check implicit <label> wrapping (basic regex approximation for simple demos)
         if not has_label:
-            # Buscar <label>...</label> que contenga a este elemento
-            # Esta es una aproximación usando re, funciona para casos simples de demo
             wrapper_match = re.search(
                 r"<label[^>]*>.*?<(?:input|select|textarea)[^>]*>.*?</label>",
                 html_str,
@@ -72,9 +73,9 @@ def check_form_labels(html_str):
         results.append(
             {
                 "selector": selector,
-                "tipo_input": input_type if tag_name == "input" else tag_name,
-                "tiene_label": has_label,
-                "metodo_detectado": method,
+                "input_type": input_type if tag_name == "input" else tag_name,
+                "has_label": has_label,
+                "detected_method": method,
             }
         )
 

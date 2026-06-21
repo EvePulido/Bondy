@@ -1,21 +1,21 @@
 # Local Project Context & Secure Coding Standards — Bondy (A11y-Forge)
 
-Este archivo define las reglas de contexto y estándares de seguridad persistentes que todos los agentes de desarrollo en este proyecto deben seguir de forma obligatoria.
+This file defines the project context and persistent security standards that all development agents in this workspace must strictly follow.
 
 ---
 
-## 1. Validación Obligatoria de Entradas (Seguridad Primero)
-* **Regla:** Antes de invocar cualquier herramienta de navegación web o automatización con Playwright (como en los validadores de foco o trampas de foco), se debe validar obligatoriamente la entrada contra el módulo de seguridad determinístico en `app/app_utils/security.py` utilizando la función `validar_input_antes_de_auditar`.
-* **Fuentes Permitidas:** Únicamente se permiten los directorios demo registrados estáticamente en `ALLOWED_SOURCES` (`demo_sites/...`) o HTML crudo pegado directamente. Queda terminantemente prohibido realizar peticiones HTTP a URLs de internet arbitrarias.
+## 1. Mandatory Input Validation (Security First)
+* **Rule:** Before invoking any web navigation or automation tool via Playwright (e.g., in focus validators or focus trap detectors), you must validate the input parameters against the deterministic security module in `app/app_utils/security.py` using the `validate_input_before_audit` function.
+* **Allowed Sources:** Only allow local demo directories statically registered in `ALLOWED_SOURCES` (`demo_sites/...`) or raw HTML content pasted directly. Arbitrary external HTTP requests to untrusted internet URLs are strictly prohibited.
 
-## 2. Calidad de Código y Ciclo de Corrección Pre-Commit
-* **Regla:** Si un intento de `git commit` o la ejecución de pruebas falla debido a las validaciones de los hooks de `pre-commit` (como análisis de Ruff, ruff-format o chequeos de tipo), el agente debe:
-  1. Detenerse inmediatamente y tratar el error como una tarea de refactorización prioritaria.
-  2. Aplicar los arreglos correspondientes de estilo o sintaxis en los archivos afectados.
-  3. Ejecutar `uv run pre-commit run --all-files` para verificar que el código pase el 100% de los chequeos limpios antes de continuar con otras tareas.
+## 2. Code Quality and Pre-Commit Remediation Loop
+* **Rule:** If a `git commit` or test execution fails due to a `pre-commit` hook check (e.g., Ruff linting, Ruff formatting, or type checking errors), you must:
+  1. Halt execution immediately and treat the violation as a high-priority refactoring task.
+  2. Apply the necessary style, syntax, or logic fixes to the affected files.
+  3. Run `uv run pre-commit run --all-files` manually to verify that 100% of the checks pass cleanly before attempting to commit again.
 
-## 3. Arquitectura del Sistema (ADK 2.0 Workflows)
-* **Regla:** La lógica de orquestación principal del proyecto debe estar implementada mediante el API de Grafos/Workflows nativo de **google-adk 2.0** en `app/agent.py`. Evitar la orquestación manual secuencial en Python sin un grafo definido si se busca mantener el estándar del framework.
+## 3. System Architecture (ADK 2.0 Workflows)
+* **Rule:** The main agent orchestration logic of the project must be implemented using the native Graphs/Workflows API of **google-adk 2.0** in `app/agent.py`. Avoid manual sequential Python orchestrations without a defined graph to comply with the framework standards.
 
-## 4. Conservación del Código
-* **Regla:** Solo se deben modificar los módulos o archivos directamente afectados por la solicitud del usuario, preservando intacto todo el código circundante, las configuraciones de los modelos de IA y el formateo estándar del proyecto.
+## 4. Code Preservation
+* **Rule:** Only modify modules or files that are directly related to the user's request. Preserve all surrounding code, comments, AI model configurations, and standard project formatting intact.

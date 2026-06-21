@@ -3,10 +3,13 @@ import re
 import sys
 
 
-def check_accessible_name(html_str):
+def check_accessible_name(html_str: str) -> list:
+    """
+    Scans interactive elements (a, button) to check if they contain an accessible name.
+    """
     results = []
 
-    # Encontrar todos los a y button
+    # Find all <a> and <button> tags with their inner HTML
     elements = re.finditer(
         r"<(a|button)([^>]*)>(.*?)</\1>", html_str, re.IGNORECASE | re.DOTALL
     )
@@ -18,28 +21,28 @@ def check_accessible_name(html_str):
 
         has_name = False
 
-        # Chequear aria-label
+        # Check aria-label
         if re.search(r'aria-label\s*=\s*["\']([^"\']+)["\']', attrs, re.IGNORECASE):
             has_name = True
-        # Chequear aria-labelledby
+        # Check aria-labelledby
         elif re.search(
             r'aria-labelledby\s*=\s*["\']([^"\']+)["\']', attrs, re.IGNORECASE
         ):
             has_name = True
         else:
-            # Texto interno (remover tags HTML)
+            # Text content (strip out inner HTML tags)
             text_content = re.sub(r"<[^>]+>", "", inner_html).strip()
             if text_content:
                 has_name = True
             else:
-                # Chequear imagen con alt
+                # Check for an img tag with a valid alt attribute inside
                 alt_match = re.search(
                     r'<img[^>]+alt\s*=\s*["\']([^"\']+)["\']', inner_html, re.IGNORECASE
                 )
                 if alt_match and alt_match.group(1).strip():
                     has_name = True
 
-        # Extraer ID o clase para el selector
+        # Extract ID or Class to build a selector representation
         id_match = re.search(r'id\s*=\s*["\']([^"\']+)["\']', attrs, re.IGNORECASE)
         class_match = re.search(
             r'class\s*=\s*["\']([^"\']+)["\']', attrs, re.IGNORECASE
@@ -54,7 +57,7 @@ def check_accessible_name(html_str):
                 selector += f".{classes[0]}"
 
         results.append(
-            {"selector": selector, "tipo": tag_name, "tiene_nombre_accesible": has_name}
+            {"selector": selector, "type": tag_name, "has_accessible_name": has_name}
         )
 
     return results

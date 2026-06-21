@@ -6,7 +6,11 @@ import tempfile
 from playwright.sync_api import sync_playwright
 
 
-def evaluate_focus_order(content):
+def evaluate_focus_order(content: str) -> dict:
+    """
+    Simulates tab navigation using Playwright, records the focused elements,
+    and returns the focus sequence and any detected accessibility anomalies.
+    """
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         page = browser.new_page()
@@ -17,7 +21,7 @@ def evaluate_focus_order(content):
         if content.startswith("http://") or content.startswith("https://"):
             page.goto(content)
         else:
-            # Playwright sometimes struggles with set_content and focus, better to use file URL
+            # Playwright sometimes struggles with set_content and focus, better to use a local file URL
             fd, temp_path = tempfile.mkstemp(suffix=".html")
             with os.fdopen(fd, "w", encoding="utf-8") as f:
                 f.write(content)
@@ -27,7 +31,7 @@ def evaluate_focus_order(content):
         focus_sequence = []
         anomalies = []
 
-        # Simular 20 tabs
+        # Simulate 20 tabs
         for _ in range(20):
             page.keyboard.press("Tab")
 
@@ -42,7 +46,7 @@ def evaluate_focus_order(content):
                     if (c) sel += '.' + c;
                 }
 
-                // Un elemento visible tiene layout rect > 0
+                // A visible element has a bounding rectangle width and height > 0
                 const rect = el.getBoundingClientRect();
                 const isVisible = rect.width > 0 && rect.height > 0;
 
@@ -54,7 +58,7 @@ def evaluate_focus_order(content):
             }""")
 
             if focused_info:
-                # Evitar reportar elementos consecutivos iguales si el foco no se movió
+                # Avoid reporting consecutive duplicate elements if focus did not move
                 if (
                     not focus_sequence
                     or focus_sequence[-1]["selector"] != focused_info["selector"]
@@ -62,7 +66,7 @@ def evaluate_focus_order(content):
                     focus_sequence.append(focused_info)
                     if not focused_info["isVisible"]:
                         anomalies.append(
-                            f"El elemento {focused_info['selector']} recibe el foco pero no es visible."
+                            f"Element {focused_info['selector']} receives focus but is not visible."
                         )
 
         browser.close()
@@ -74,8 +78,8 @@ def evaluate_focus_order(content):
                 pass
 
         return {
-            "secuencia_foco": [item["selector"] for item in focus_sequence],
-            "anomalias": anomalies,
+            "focus_sequence": [item["selector"] for item in focus_sequence],
+            "anomalies": anomalies,
         }
 
 
