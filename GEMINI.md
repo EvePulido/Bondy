@@ -1,15 +1,27 @@
 # Coding Agent Guide — A11y-Forge (Bondy)
 
-## Prerequisites
+## Prerequisites & Local Setup
 
-Install the CLI (one-time):
+### 1. Instalar CLI global (Solo una vez)
 ```bash
 uv tool install google-agents-cli
 ```
 
-Ensure Playwright browsers are installed:
+### 2. Sincronizar Dependencias del Proyecto
+Este comando sincroniza el entorno virtual `.venv` con el archivo lock del repositorio:
+```bash
+uv sync
+```
+
+### 3. Instalar Navegadores de Playwright (Requerido localmente por cada desarrollador)
 ```bash
 uv run playwright install --with-deps chromium
+```
+
+### 4. Configurar Hooks de Pre-Commit (Requerido localmente por cada desarrollador)
+Para asegurar la calidad de código y formateo automático antes de realizar commits:
+```bash
+uv run pre-commit install
 ```
 
 ---

@@ -87,7 +87,7 @@ El desarrollo del MVP de 17 días se completará siguiendo estos pasos sin bifur
 - [x] **Fase 1: Mapeo de Skills y Sitios de Prueba**
   * Copiar las 9 skills del proyecto previo (`Bondy/.agents/skills/*`) hacia `.agents/skills/*`.
   * Copiar los sitios demo (`Bondy/demo_sites/*`) a la raíz del espacio de trabajo.
-- [ ] **Fase 2: Configuración del Entorno Seguro**
+- [x] **Fase 2: Configuración del Entorno Seguro**
   * Sincronizar el entorno de desarrollo con `uv sync`.
   * Instalar binarios de Playwright localmente: `uv run playwright install --with-deps chromium`.
   * Crear el script de hook de Git `pre-commit` en la carpeta local de control de versiones.

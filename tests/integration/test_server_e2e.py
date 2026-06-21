@@ -183,9 +183,9 @@ def test_chat_stream_error_handling(server_fixture: subprocess.Popen[str]) -> No
         STREAM_URL, headers=HEADERS, json=data, stream=True, timeout=10
     )
 
-    assert response.status_code == 422, (
-        f"Expected status code 422, got {response.status_code}"
-    )
+    assert (
+        response.status_code == 422
+    ), f"Expected status code 422, got {response.status_code}"
     logger.info("Error handling test completed successfully")
 
 
