@@ -1,4 +1,4 @@
-# Coding Agent Guide
+# Coding Agent Guide — A11y-Forge (Bondy)
 
 ## Prerequisites
 
@@ -7,15 +7,21 @@ Install the CLI (one-time):
 uv tool install google-agents-cli
 ```
 
+Ensure Playwright browsers are installed:
+```bash
+uv run playwright install --with-deps chromium
+```
+
 ---
 
 ## Development Phases
 
 ### Phase 1: Understand Requirements
-Before writing any code, understand the project's requirements, constraints, and success criteria.
+Before writing any code, understand the project's requirements, constraints, and success criteria. Read the technical design in `analysis_results.md` and `a11y-forge-build-spec (1).md` if necessary.
 
 ### Phase 2: Build and Implement
 Implement agent logic in `app/`. Use `agents-cli playground` for interactive testing. Iterate based on user feedback.
+All skills must be stored under `.agents/skills/<name>/SKILL.md` (ADK Autodiscovery).
 
 ### Phase 3: The Evaluation Loop (Main Iteration Phase)
 Start with 1-2 eval cases, run `agents-cli eval generate`, then `agents-cli eval grade`, iterate by making changes and rerunning both commands until satisfied. Expect 5-10+ iterations. Once you have a baseline, reach for `agents-cli eval compare` (regression diffs), `agents-cli eval analyze` (cluster failure modes), and `agents-cli eval optimize` (auto-tune prompts). See the **Evaluation Guide** for metrics, dataset schema, LLM-as-judge config, and common gotchas.
@@ -53,9 +59,15 @@ Ask the user: Option A (simple single-project) or Option B (full CI/CD pipeline 
 ## Operational Guidelines for Coding Agents
 
 - **Code preservation**: Only modify code directly targeted by the user's request. Preserve all surrounding code, config values (e.g., `model`), comments, and formatting.
-- **NEVER change the model** unless explicitly asked.
+- **Project Structure**: Maintain `google-adk` standard workspace format. Keep agent and app files inside the `app/` folder.
+- **Workflow & Graphs**: Implement stateful logic using the Workflow API of ADK 2.0. Avoid manual Python orchestrations.
+- **Security Guardrails**:
+  - Always validate input path/URL parameters against `ALLOWED_SOURCES` in `app/app_utils/security.py` before allowing Playwright navigation.
+  - Never expose credentials or local paths in agent outputs or system prompts.
+- **NEVER change the model** unless explicitly asked. The default model is `gemini-flash-latest` (alias, do not hardcode numbered versions).
 - **Model 404 errors**: Fix `GOOGLE_CLOUD_LOCATION` (e.g., `global` instead of `us-east1`), not the model name.
 - **ADK tool imports**: Import the tool instance, not the module: `from google.adk.tools.load_web_page import load_web_page`
 - **Run Python with `uv`**: `uv run python script.py`. Run `agents-cli install` first.
 - **Stop on repeated errors**: If the same error appears 3+ times, fix the root cause instead of retrying.
 - **Terraform conflicts** (Error 409): Use `terraform import` instead of retrying creation.
+
