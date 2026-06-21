@@ -1,11 +1,7 @@
 ---
-name: validar-labels-formularios
+name: form-labels-validator
 description: |
-  Verifica que TODO input de formulario (text, checkbox, radio, select, textarea)
-  tenga un label asociado vía <label for="">, envoltura <label>, o
-  aria-label/aria-labelledby. Reemplaza y amplía el alcance original de
-  "solo radio buttons" a todos los campos de formulario.
-  Usar para auditar formularios completos, no elementos individuales sueltos.
+  Audits form elements (text inputs, checkboxes, radio buttons, select tags, textareas) to verify they are associated with an accessible label via <label for>, label nesting, aria-label, or aria-labelledby. Use this skill when auditing form accessibility (WCAG 1.3.1 / 4.1.2).
 ---
 
 ## Instrucciones

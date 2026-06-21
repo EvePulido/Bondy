@@ -1,10 +1,7 @@
 ---
-name: generar-fix-sugerido
+name: suggestion-fix-generator
 description: |
-  Toma un hallazgo (de cualquiera de las 8 skills anteriores) junto con el nodo
-  DOM afectado, y genera el snippet de código corregido en formato antes/después.
-  Usar como último paso, después de que el Auditor haya generado todos los hallazgos.
-  NO debe inventar selectores o nodos que no estén en el hallazgo recibido.
+  Consumes a specific accessibility finding (such as bad alt, low contrast, or missing forms labels) along with the affected original DOM node HTML content, and generates the corrected HTML code snippet (with before/after diff) using target WCAG pattern templates. Use this as the final post-audit step to suggest immediate fixes.
 ---
 
 ## Instrucciones

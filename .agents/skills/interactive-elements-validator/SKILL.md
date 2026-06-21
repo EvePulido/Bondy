@@ -1,10 +1,7 @@
 ---
-name: validar-nombre-accesible-interactivo
+name: interactive-elements-validator
 description: |
-  Verifica que cada <a> y <button> tenga un nombre accesible: texto visible,
-  aria-label, aria-labelledby, o alt de una imagen contenida. Cubre las
-  categorías "Empty Links" y "Empty Buttons" del WebAIM Million en un solo skill.
-  Usar para auditar todos los elementos interactivos de navegación/acción.
+  Scans all links (<a>) and button tags to verify they contain an accessible name (either visible text, an aria-label, aria-labelledby, or image alt text). Use this tool to prevent empty links and empty buttons (WCAG 2.4.4 / 4.1.2).
 ---
 
 ## Instrucciones

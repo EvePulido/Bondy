@@ -1,10 +1,7 @@
 ---
-name: evaluar-orden-foco
+name: focus-order-validator
 description: |
-  Simula pulsaciones de Tab con Playwright y registra la secuencia real de
-  elementos enfocados. Compara contra el orden visual/DOM esperado.
-  Usar para detectar saltos de foco ilógicos (ej. que tabular salte del header
-  directo al footer sin pasar por el contenido principal).
+  Simulates keyboard tab navigation sequence on a page using Playwright, records the actual sequence of focused elements, and compares it to the visually expected or DOM logical structure to identify focus order jumps (e.g. tab bypassing main content or jumping randomly). Use this when testing tab order consistency and WCAG 2.4.3 compliance.
 ---
 
 ## Instrucciones

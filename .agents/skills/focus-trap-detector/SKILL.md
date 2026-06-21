@@ -1,9 +1,7 @@
 ---
-name: detectar-trampa-de-foco
+name: focus-trap-detector
 description: |
-  Simula Tab repetidamente (mínimo 30 pulsaciones) y detecta si el foco entra
-  en un ciclo del que no puede salir (ej. un modal sin botón de cierre
-  accesible por teclado). Usar en cualquier componente tipo modal/dropdown/popup.
+  Simulates keyboard tab navigation (at least 30 focus cycles) using Playwright to detect if keyboard focus becomes trapped inside an interactive container like a modal dialog, dropdown, or popup menu with no way to exit via keyboard controls. Use this skill when evaluating keyboard accessibility (WCAG 2.1.2) for any overlay components.
 ---
 
 ## Instrucciones

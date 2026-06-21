@@ -1,11 +1,7 @@
 ---
-name: validar-calidad-alt-text
+name: alt-text-quality-analyzer
 description: |
-  Compara cada imagen real contra su atributo alt usando un modelo con visión.
-  Determina si el alt describe fielmente el contenido/función de la imagen en su
-  contexto (¿está dentro de un link/botón? ¿hay un figcaption adyacente?).
-  NO asume automáticamente que un caption adyacente hace innecesario el alt —
-  solo lo marca como "posible redundancia, revisar".
+  Analyzes a web page image against its current alt attribute text using multimodal vision models. Evaluates if the alt text accurately describes the image context, checking if it is empty, generic, or mismatched with the visual content. Use this to verify descriptive quality of image alt tags (WCAG 1.1.1).
 ---
 
 ## Instrucciones

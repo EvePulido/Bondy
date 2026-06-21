@@ -1,4 +1,4 @@
-# A11y-Forge (Bondy) — Documento de Diseño y Plan de Implementación
+# Bondy — Documento de Diseño y Plan de Implementación
 
 Este documento unifica y centraliza la visión del proyecto, el modelado de amenazas, las especificaciones de accesibilidad WCAG y el flujo de desarrollo secuencial para **A11y-Forge** utilizando **google-adk 2.0** y **agents-cli**.
 
@@ -84,7 +84,7 @@ En concordancia con los principios de desarrollo seguro del codelab, el proyecto
 
 El desarrollo del MVP de 17 días se completará siguiendo estos pasos sin bifurcaciones paralelas:
 
-- [ ] **Fase 1: Mapeo de Skills y Sitios de Prueba**
+- [x] **Fase 1: Mapeo de Skills y Sitios de Prueba**
   * Copiar las 9 skills del proyecto previo (`Bondy/.agents/skills/*`) hacia `.agents/skills/*`.
   * Copiar los sitios demo (`Bondy/demo_sites/*`) a la raíz del espacio de trabajo.
 - [ ] **Fase 2: Configuración del Entorno Seguro**
@@ -96,20 +96,9 @@ El desarrollo del MVP de 17 días se completará siguiendo estos pasos sin bifur
 - [ ] **Fase 4: Grafo del Workflow en `app/agent.py`**
   * Definir al Auditor y al Refactorizador como `LlmAgent` de ADK.
   * Cablear la orquestación a través de la API `Workflow` del SDK (conectando el estado de salida `Finding[]` a las sugerencias de fixes).
-- [ ] **Fase 5: Servidor MCP**
+- [ ] **Fase 5: Servidor MCP e Interfaz FastAPI**
   * Ubicar el código del servidor de lectura de GitHub en `mcp_server/github_server.py`.
-- [ ] **Fase 6: Interfaz e Integración FastAPI (`app/fast_api_app.py`)**
-  * Desarrollar el frontend interactivo en FastAPI con vistas Jinja en `web/templates/` para el playground de usuario.
-  * Conectar el formulario web al Workflow de ADK y visualizar el reporte `AuditReport`.
-- [ ] **Fase 7: Evaluaciones y Pruebas Unitarias**
-  * Escribir tests de Pytest bajo `tests/` para verificar el correcto funcionamiento del validador de inyecciones y de las 5 skills determinísticas.
-  * Programar tests automáticos por cada una de las 9 skills en `tests/skills_eval/`.
-  * Configurar `eval_config.yaml` y dataset en JSON para correr la evaluación multimodal `agents-cli eval run`.
-- [ ] **Fase 8: Infraestructura y Pipelines de CI/CD**
-  * Crear el workflow de GitHub Actions (`.github/workflows/bondy-audit.yml`) para automatizar el audit en cada Pull Request.
-  * (Opcional) Configurar la infraestructura con Terraform si se requiere despliegue en la nube.
-- [ ] **Fase 9: Documentación y Media**
-  * Redactar un `README.md` exhaustivo detallando la arquitectura y las instrucciones de setup local.
-  * Grabar el video de demostración de 5 minutos centrado en los criterios WCAG y WebAIM Million.
-  * Escribir el writeup técnico final para la entrega.
-
+  * Desarrollar el endpoint web en `app/fast_api_app.py` que permita auditar un sitio demo o pegar un HTML y despliegue el reporte final.
+- [ ] **Fase 6: Evaluaciones y Pruebas Unitarias**
+  * Escribir tests de Pytest bajo `tests/` para verificar el correcto funcionamiento del validador de inyecciones y de las skills determinísticas.
+  * Configurar `eval_config.yaml` y correr `agents-cli eval run` para calibrar el grading.

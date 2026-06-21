@@ -1,9 +1,7 @@
 ---
-name: clasificar-imagen-decorativa
+name: image-decorator-classifier
 description: |
-  Determina si una imagen es puramente decorativa (no aporta información
-  única más allá de lo estético) y por lo tanto debería llevar alt="" en vez
-  de una descripción innecesaria. Usa el contexto del DOM circundante.
+  Determines if a web page image is purely decorative (i.e. serves only aesthetic purposes and provides no unique information) and should therefore be marked with alt="" instead of carrying a redundant description. Use this tool when analyzing image quality and deciding if a descriptive alt text is necessary based on the visual content and surrounding text.
 ---
 
 ## Instrucciones

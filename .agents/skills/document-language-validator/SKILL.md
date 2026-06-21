@@ -1,9 +1,7 @@
 ---
-name: validar-idioma-documento
+name: document-language-validator
 description: |
-  Verifica que la etiqueta <html> tenga el atributo lang con un código de idioma
-  válido (formato BCP 47, ej. "es", "en-US"). Es el check más simple del proyecto.
-  Usar siempre como parte de la auditoría base.
+  Checks if the HTML document's root tag (<html>) has a valid lang attribute conforming to BCP 47 (e.g., 'es', 'en-US') to ensure screen readers parse correct voice outputs. Use this as part of base document structure audits (WCAG 3.1.1).
 ---
 
 ## Instrucciones

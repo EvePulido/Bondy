@@ -1,11 +1,7 @@
 ---
-name: validar-contraste-texto
+name: text-contrast-calculator
 description: |
-  Calcula el ratio de contraste entre texto y fondo para cada elemento de texto
-  visible en una página web. Determina si cumple el mínimo WCAG 2 AA (4.5:1 texto
-  normal, 3:1 texto grande).
-  Usar cuando se necesite verificar legibilidad de texto contra su fondo.
-  NO usar para contraste de elementos no textuales (iconos, gráficos, bordes).
+  Calculates the color contrast ratio between text (foreground) and its background element for all visible text nodes in a DOM snapshot to verify legibility. Evaluates if they satisfy the WCAG 2 AA minimum ratio limits (4.5:1 for normal text, 3.0:1 for large text). Use this tool for checking color accessibility.
 ---
 
 ## Instrucciones
