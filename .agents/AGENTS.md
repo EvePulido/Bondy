@@ -1,4 +1,4 @@
-# Local Project Context & Secure Coding Standards — Bondy (A11y-Forge)
+# Local Project Context & Secure Coding Standards — Bondy
 
 This file defines the project context and persistent security standards that all development agents in this workspace must strictly follow.
 

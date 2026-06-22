@@ -1,86 +1,56 @@
-# bondy
+# Bondy ♿🛡️
 
-Simple ReAct agent
-Agent generated with `agents-cli` version `0.5.0`
+**Bondy** is an autonomous, agentic Web Accessibility Auditor built on **Google ADK 2.0**. It leverages large language models and deterministic Playwright routines to scan web applications, identify accessibility violations (WCAG 2.2 AA), and autonomously suggest exact code fixes.
 
-## Project Structure
+## 🚀 Features
 
+- **Autonomous Agent Workflow**: A dual-agent architecture (Auditor + Refactorizador) connected via ADK Workflows.
+- **Deterministic Skills**: 6 highly specialized, deterministic accessibility skills that execute locally via Playwright (e.g., Focus Trap Detection, Contrast Calculation).
+- **Security Guardrails**: Input validation to ensure only authorized local environments or raw HTML are scanned.
+- **Local-First AI**: Runs flawlessly using Google AI Studio API Keys (`gemini-flash-latest`), perfect for local deployments without complex GCP architectures.
+
+## 📁 Architecture & Workflow
+
+1. **Auditor Agent**: Uses Playwright and multimodal vision tools to scan a target directory or raw HTML and generates `Finding` reports.
+2. **Refactorizador Agent**: Consumes the findings and generates precise code modifications (`FixSuggestion`) based on WCAG patterns.
+
+## 🛠️ Quick Start
+
+### 1. Prerequisites
+- Python 3.12+
+- `uv` (Python Package Manager)
+- A Google AI Studio API Key.
+
+### 2. Installation
+```bash
+# Sync dependencies
+uv sync
+
+# Install Playwright browsers (Required)
+uv run playwright install --with-deps chromium
+
+# Set your API Key
+$env:GEMINI_API_KEY="AQ.YourApiKeyHere..."
 ```
-bondy/
-├── app/         # Core agent code
-│   ├── agent.py               # Main agent logic
-│   └── app_utils/             # App utilities and helpers
-├── tests/                     # Unit, integration, and load tests
-├── GEMINI.md                  # AI-assisted development guide
-└── pyproject.toml             # Project dependencies
+
+### 3. Run the API and Web UI
+Launch the built-in FastAPI server to access the Bondy Web UI:
+```bash
+uv run python -m uvicorn app.fast_api_app:app --reload
 ```
+Go to `http://localhost:8000/bondy` to interact with the agent.
 
-> 💡 **Tip:** Use [Gemini CLI](https://github.com/google-gemini/gemini-cli) for AI-assisted development - project context is pre-configured in `GEMINI.md`.
+## 🧪 Testing
 
-## Requirements
-
-Before you begin, ensure you have:
-- **uv**: Python package manager (used for all dependency management in this project) - [Install](https://docs.astral.sh/uv/getting-started/installation/) ([add packages](https://docs.astral.sh/uv/concepts/dependencies/) with `uv add <package>`)
-- **agents-cli**: Agents CLI - Install with `uv tool install google-agents-cli`
-- **Google Cloud SDK**: For GCP services - [Install](https://cloud.google.com/sdk/docs/install)
-
-
-## Quick Start
-
-Install `agents-cli` and its skills if not already installed:
+We use `pytest` for all unit and integration testing. Due to quota limitations on free API keys, integration tests use a simulated (Mock) LLM response.
 
 ```bash
-uvx google-agents-cli setup
+uv run pytest tests/unit tests/integration
 ```
 
-Install required packages:
+## 🔒 Security
 
-```bash
-agents-cli install
-```
-
-Test the agent with a local web server:
-
-```bash
-agents-cli playground
-```
-
-You can also use features from the [ADK](https://adk.dev/) CLI with `uv run adk`.
-
-## Commands
-
-| Command              | Description                                                                                 |
-| -------------------- | ------------------------------------------------------------------------------------------- |
-| `agents-cli install` | Install dependencies using uv                                                         |
-| `agents-cli playground` | Launch local development environment                                                  |
-| `agents-cli lint`    | Run code quality checks                                                               |
-| `agents-cli eval`    | Evaluate agent behavior (generate, grade, analyze, and more — see `agents-cli eval --help`) |
-| `uv run pytest tests/unit tests/integration` | Run unit and integration tests                                                        |
-
-## 🛠️ Project Management
-
-| Command | What It Does |
-|---------|--------------|
-| `agents-cli scaffold enhance` | Add CI/CD pipelines and Terraform infrastructure |
-| `agents-cli infra cicd` | One-command setup of entire CI/CD pipeline + infrastructure |
-| `agents-cli scaffold upgrade` | Auto-upgrade to latest version while preserving customizations |
+All tools strictly adhere to the project's security rules (`AGENTS.md`), preventing unauthorized web navigation and blocking directory traversal outside of the `ALLOWED_SOURCES`.
 
 ---
-
-## Development
-
-Edit your agent logic in `app/agent.py` and test with `agents-cli playground` - it auto-reloads on save.
-
-## Deployment
-
-```bash
-gcloud config set project <your-project-id>
-agents-cli deploy
-```
-
-To add CI/CD and Terraform, run `agents-cli scaffold enhance`.
-To set up your production infrastructure, run `agents-cli infra cicd`.
-
-## Observability
-
-Built-in telemetry exports to Cloud Trace, BigQuery, and Cloud Logging.
+*Built with ❤️ using the Google Agent Development Kit.*

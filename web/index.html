@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Bondy - A11y Forge</title>
+    <title>Bondy</title>
     <link rel="stylesheet" href="/static/index.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
 </head>
@@ -16,8 +16,14 @@
 
         <main>
             <div class="input-section">
-                <label for="source">Source Path (e.g. demo_sites/site_1_bad_alt)</label>
-                <input type="text" id="source" placeholder="demo_sites/site_1_bad_alt" value="demo_sites/site_1_bad_alt">
+                <label for="source">Source Path</label>
+                <select id="source" onchange="toggleCustom()">
+                    <option value="demo_sites/site_1_bad_alt">demo_sites/site_1_bad_alt</option>
+                    <option value="demo_sites/site_2_focus_trap">demo_sites/site_2_focus_trap</option>
+                    <option value="demo_sites/site_3_color_contrast">demo_sites/site_3_color_contrast</option>
+                    <option value="custom">Other (Custom Path)</option>
+                </select>
+                <input type="text" id="custom_source" placeholder="Enter custom path..." style="display: none;">
                 
                 <label for="raw_html">Or Paste Raw HTML</label>
                 <textarea id="raw_html" placeholder="<html>...</html>"></textarea>

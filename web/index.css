@@ -54,13 +54,18 @@ label {
     color: #cbd5e1;
 }
 
-input, textarea {
+input, textarea, select {
     background: rgba(0, 0, 0, 0.2);
     border: 1px solid var(--glass-border);
     border-radius: 8px;
     padding: 12px;
     color: white;
     font-family: 'Inter', sans-serif;
+}
+
+select option {
+    background: #1e293b;
+    color: white;
 }
 
 textarea {

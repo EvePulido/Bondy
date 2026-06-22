@@ -1,0 +1,2 @@
+{"input": "Please run an accessibility audit on demo_sites/site_1_bad_alt/index.html", "reference": "The audit should find missing or bad alt text on images."}
+{"input": "Please run an accessibility audit on demo_sites/site_2_focus_trap/index.html", "reference": "The audit should detect a keyboard focus trap."}

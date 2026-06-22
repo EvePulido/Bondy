@@ -1,4 +1,4 @@
-# Coding Agent Guide — A11y-Forge (Bondy)
+# Coding Agent Guide — Bondy
 
 ## Prerequisites & Local Setup
 

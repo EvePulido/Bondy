@@ -1,0 +1,4 @@
+dataset: eval_dataset.jsonl
+agent: app.agent:root_agent
+metrics:
+  - exact_match

@@ -1,5 +1,20 @@
+function toggleCustom() {
+    const select = document.getElementById('source');
+    const customInput = document.getElementById('custom_source');
+    if (select.value === 'custom') {
+        customInput.style.display = 'block';
+    } else {
+        customInput.style.display = 'none';
+        customInput.value = '';
+    }
+}
+
 async function runAudit() {
-    const source = document.getElementById('source').value;
+    let source = document.getElementById('source').value;
+    if (source === 'custom') {
+        source = document.getElementById('custom_source').value;
+    }
+    
     const rawHtml = document.getElementById('raw_html').value;
     
     document.getElementById('loader').style.display = 'block';

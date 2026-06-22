@@ -1,6 +1,6 @@
 # Bondy: Development & Migration Plan
 
-This checklist outlines the sequential migration and development steps to consolidate the final **Bondy (A11y-Forge)** project into the root workspace using the **Google ADK 2.0** architecture.
+This checklist outlines the sequential migration and development steps to consolidate the final **Bondy** project into the root workspace using the **Google ADK 2.0** architecture.
 
 ---
 
@@ -27,10 +27,10 @@ This checklist outlines the sequential migration and development steps to consol
 ### Phase 5: MCP Server and FastAPI Interface
 - [x] Set up the GitHub reader MCP server in `mcp_server/github_server.py`.
 - [x] Develop the FastAPI application in `app/fast_api_app.py` to serve the premium web UI, allowing users to run audits on demo sites or raw HTML, and view the final `AuditReport` with suggested fixes.
-
+uv run python -m uvicorn app.fast_api_app:app --reload
 ### Phase 6: Evaluations and Unit Testing
-- [ ] Add pytest test cases under `tests/` to validate the security runner and the 6 deterministic skills.
-- [ ] Set up `eval_config.yaml` and run `agents-cli eval run` to calibrate LLM decisions and agent parameters.
+- [x] Add pytest test cases under `tests/` to validate the security runner and the 6 deterministic skills.
+- [x] Set up `eval_config.yaml` and run `agents-cli eval run` (SKIPPED: `agents-cli eval` requires a Vertex AI GCP Project, incompatible with local AI Studio keys).
 
 ### Phase 7: Delivery and Release Closure
 - [ ] Set up the GitHub Actions CI/CD workflow in `.github/workflows/bondy-audit.yml`.
