@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bondy - A11y Forge</title>
+    <link rel="stylesheet" href="/static/index.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="glass-container">
+        <header>
+            <h1>Bondy Accessibility Auditor</h1>
+            <p>Run WCAG 2.2 AA audits with AI-powered automatic refactoring.</p>
+        </header>
+
+        <main>
+            <div class="input-section">
+                <label for="source">Source Path (e.g. demo_sites/site_1_bad_alt)</label>
+                <input type="text" id="source" placeholder="demo_sites/site_1_bad_alt" value="demo_sites/site_1_bad_alt">
+                
+                <label for="raw_html">Or Paste Raw HTML</label>
+                <textarea id="raw_html" placeholder="<html>...</html>"></textarea>
+
+                <button id="run-btn" onclick="runAudit()">Run Audit</button>
+            </div>
+
+            <div class="loader" id="loader" style="display: none;">
+                <div class="spinner"></div>
+                <p>Auditing and Refactoring in progress...</p>
+            </div>
+
+            <div class="results-section" id="results" style="display: none;">
+                <h2>Audit Report & Fixes</h2>
+                <div id="results-content"></div>
+            </div>
+        </main>
+    </div>
+    <script src="/static/app.js"></script>
+</body>
+</html>
