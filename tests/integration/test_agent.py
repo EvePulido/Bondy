@@ -23,35 +23,52 @@ from app.agent import root_agent
 def test_agent_stream() -> None:
     """
     Integration test for the agent stream functionality.
-    Tests that the agent returns valid streaming responses.
+    Tests that the agent returns valid streaming responses without hitting real APIs.
     """
+    from unittest.mock import patch
 
-    session_service = InMemorySessionService()
+    from google.adk.models import LlmResponse
 
-    session = session_service.create_session_sync(user_id="test_user", app_name="test")
-    runner = Runner(agent=root_agent, session_service=session_service, app_name="test")
-
-    message = types.Content(
-        role="user", parts=[types.Part.from_text(text="Why is the sky blue?")]
-    )
-
-    events = list(
-        runner.run(
-            new_message=message,
-            user_id="test_user",
-            session_id=session.id,
-            run_config=RunConfig(streaming_mode=StreamingMode.SSE),
+    async def mock_generate_content_async(*args, **kwargs):
+        yield LlmResponse(
+            content=types.Content(
+                role="model", parts=[types.Part.from_text(text="Mocked response!")]
+            ),
         )
-    )
-    assert len(events) > 0, "Expected at least one message"
 
-    has_text_content = False
-    for event in events:
-        if (
-            event.content
-            and event.content.parts
-            and any(part.text for part in event.content.parts)
-        ):
-            has_text_content = True
-            break
-    assert has_text_content, "Expected at least one message with text content"
+    with patch(
+        "google.adk.models.google_llm.Gemini.generate_content_async",
+        new=mock_generate_content_async,
+    ):
+        session_service = InMemorySessionService()
+        session = session_service.create_session_sync(
+            user_id="test_user", app_name="test"
+        )
+        runner = Runner(
+            agent=root_agent, session_service=session_service, app_name="test"
+        )
+
+        message = types.Content(
+            role="user", parts=[types.Part.from_text(text="Why is the sky blue?")]
+        )
+
+        events = list(
+            runner.run(
+                new_message=message,
+                user_id="test_user",
+                session_id=session.id,
+                run_config=RunConfig(streaming_mode=StreamingMode.SSE),
+            )
+        )
+        assert len(events) > 0, "Expected at least one message"
+
+        has_text_content = False
+        for event in events:
+            if (
+                event.content
+                and event.content.parts
+                and any(part.text for part in event.content.parts)
+            ):
+                has_text_content = True
+                break
+        assert has_text_content, "Expected at least one message with text content"

@@ -73,7 +73,6 @@ STRICT RULES:
 1. You must ALWAYS use tools to validate, never guess.
 2. Your output must be ONLY a list of Finding objects.
 3. Do NOT suggest fixes here, only report (the Refactorer will handle the fixes).""",
-    output_schema=List[Finding],
     output_key="findings",
     tools=[auditor_tools],
 )
@@ -85,7 +84,6 @@ refactorizador_agent = LlmAgent(
 Your sole responsibility is to take the error reports (Findings) and use your tools to produce the corrected code.
 Do NOT modify selectors, do not invent unnecessary code, and follow the WCAG fix patterns.
 Your output MUST be strictly a list of FixSuggestion objects.""",
-    output_schema=List[FixSuggestion],
     output_key="fixes",
     tools=[refactorizador_tools],
 )
