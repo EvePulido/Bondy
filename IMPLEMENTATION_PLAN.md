@@ -28,6 +28,7 @@ This checklist outlines the sequential migration and development steps to consol
 - [x] Set up the GitHub reader MCP server in `mcp_server/github_server.py`.
 - [x] Develop the FastAPI application in `app/fast_api_app.py` to serve the premium web UI, allowing users to run audits on demo sites or raw HTML, and view the final `AuditReport` with suggested fixes.
 uv run python -m uvicorn app.fast_api_app:app --reload
+
 ### Phase 6: Evaluations and Unit Testing
 - [x] Add pytest test cases under `tests/` to validate the security runner and the 6 deterministic skills.
 - [x] Set up `eval_config.yaml` and run `agents-cli eval run` (SKIPPED: `agents-cli eval` requires a Vertex AI GCP Project, incompatible with local AI Studio keys).
@@ -37,3 +38,11 @@ uv run python -m uvicorn app.fast_api_app:app --reload
 - [ ] Write the comprehensive repository `README.md` containing architecture overview, installation, and usage instructions.
 - [ ] Record the 5-minute project demonstration video.
 - [ ] Write the final Kaggle essay/writeup.
+
+### Phase 8: Token Optimization & Web UI Enhancements
+- [x] Analyze and mitigate Google AI Studio Free Tier rate limits by migrating to `gemini-3.1-flash-lite` (15 RPM / 500 RPD) and adding explicit `read_local_file` tool to the agent.
+- [x] Implement backend retry loops with automatic sleep in `run_audit` when `429 RESOURCE_EXHAUSTED` occurs.
+- [x] Fix LLM resource load failures by explicitly documenting files and adding no-script notes in LLM-based skills.
+- [ ] Redesign the localhost:8000 web interface:
+  - [ ] Change the UI style to be more accessible, modern, clean, and pleasing to the eye (following WCAG contrast and readability standards).
+  - [ ] Ensure the web application handles loading, success, and error feedback states gracefully.

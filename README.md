@@ -21,24 +21,36 @@
 - `uv` (Python Package Manager)
 - A Google AI Studio API Key.
 
-### 2. Installation
-```bash
-# Sync dependencies
-uv sync
-
-# Install Playwright browsers (Required)
-uv run playwright install --with-deps chromium
-
-# Set your API Key
-$env:GEMINI_API_KEY="AQ.YourApiKeyHere..."
-```
+### 2. Installation & Credentials Setup
+1. Clone the repository and sync dependencies:
+   ```bash
+   uv sync
+   ```
+2. Install Playwright browsers (required for deterministic visual/focus skills):
+   ```bash
+   uv run playwright install --with-deps chromium
+   ```
+3. Create a `.env` file in the root directory of the project and paste your Gemini API Key. To prevent conflicts with any expired or invalid environment variables configured globally on your local machine, **set both variables to the same key**:
+   ```env
+   GEMINI_API_KEY=tu_api_key_de_ai_studio
+   GOOGLE_API_KEY=tu_api_key_de_ai_studio
+   ```
 
 ### 3. Run the API and Web UI
 Launch the built-in FastAPI server to access the Bondy Web UI:
-```bash
-uv run python -m uvicorn app.fast_api_app:app --reload
-```
-Go to `http://localhost:8000/bondy` to interact with the agent.
+   ```bash
+   uv run python -m uvicorn app.fast_api_app:app --reload
+   ```
+   Go to `http://localhost:8000/bondy` to interact with the agent.
+
+---
+
+## ⚙️ Quota & Token Optimization
+
+Since the Gemini Free Tier has strict rate limits (especially for requests per minute and per day), please review the [Optimization Guide](file:///C:/Users/evely/OneDrive/Desktop/Bondy/bondy/docs/OPTIMIZATION_GUIDE.md) to learn how to:
+- Dynamically limit active skills to reduce token overhead.
+- Design targeted local demo pages.
+- Handle contrast validation without compromising production CSS practices.
 
 ## 🧪 Testing
 

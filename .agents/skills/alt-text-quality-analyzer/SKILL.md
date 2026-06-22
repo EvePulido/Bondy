@@ -13,6 +13,10 @@ description: |
 5. Returns a verdict (`good`, `poor`, `missing`, `redundant`), a detailed explanation, and a suggested fix: `{ "verdict": string, "explanation": string, "suggested_fix": string|null }`.
 6. AI Model: gemini-3.5-flash.
 
+## Resources
+- **references/wcag_1_1_1.md**: Contains reference guidelines for WCAG 1.1.1.
+- **Note**: There are no scripts in this skill. The LLM must perform the analysis itself directly without attempting to run any script.
+
 ## When NOT to activate this skill
 
 - If the element under evaluation is not an `<img>` tag or does not represent an image role.
