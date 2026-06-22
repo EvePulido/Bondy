@@ -81,7 +81,7 @@ refactorizador_tools = SkillToolset(
 # ----- Agents -----
 auditor_agent = LlmAgent(
     name="Auditor",
-    model=Gemini(model="gemini-2.5-flash"),
+    model=Gemini(model="gemini-3.1-flash-lite"),
     instruction="""You are an expert web accessibility auditor (WCAG 2.2 AA).
 Your sole responsibility is to use the tools at your disposal to scan the provided HTML or source and find accessibility violations.
 
@@ -95,7 +95,7 @@ STRICT RULES:
 
 refactorizador_agent = LlmAgent(
     name="Refactorizador",
-    model=Gemini(model="gemini-2.5-flash"),
+    model=Gemini(model="gemini-3.1-flash-lite"),
     instruction="""You are an expert Web Accessibility Refactorer.
 Your sole responsibility is to take the error reports (Findings) and use your tools to produce the corrected code.
 Do NOT modify selectors, do not invent unnecessary code, and follow the WCAG fix patterns.
