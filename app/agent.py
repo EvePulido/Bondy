@@ -56,7 +56,23 @@ all_skills = [
     if os.path.isdir(os.path.join(skills_dir, name))
 ]
 
+
 # ----- Toolset -----
+def read_local_file(file_path: str) -> str:
+    """Reads the content of an HTML file or directory to scan for accessibility issues.
+
+    Args:
+        file_path: The file path or folder name (e.g. 'demo_sites/site_1_bad_alt').
+    """
+    from app.app_utils.security import get_safe_demo_path
+
+    # Resolve path safely using security module
+    safe_path = get_safe_demo_path(file_path)
+
+    with open(safe_path, "r", encoding="utf-8") as f:
+        return f.read()
+
+
 auditor_tools = SkillToolset(skills=all_skills)
 refactorizador_tools = SkillToolset(
     skills=[s for s in all_skills if s.name == "suggestion-fix-generator"]
@@ -65,7 +81,7 @@ refactorizador_tools = SkillToolset(
 # ----- Agents -----
 auditor_agent = LlmAgent(
     name="Auditor",
-    model=Gemini(model="gemini-flash-latest"),
+    model=Gemini(model="gemini-2.5-flash"),
     instruction="""You are an expert web accessibility auditor (WCAG 2.2 AA).
 Your sole responsibility is to use the tools at your disposal to scan the provided HTML or source and find accessibility violations.
 
@@ -74,12 +90,12 @@ STRICT RULES:
 2. Your output must be ONLY a list of Finding objects.
 3. Do NOT suggest fixes here, only report (the Refactorer will handle the fixes).""",
     output_key="findings",
-    tools=[auditor_tools],
+    tools=[auditor_tools, read_local_file],
 )
 
 refactorizador_agent = LlmAgent(
     name="Refactorizador",
-    model=Gemini(model="gemini-flash-latest"),
+    model=Gemini(model="gemini-2.5-flash"),
     instruction="""You are an expert Web Accessibility Refactorer.
 Your sole responsibility is to take the error reports (Findings) and use your tools to produce the corrected code.
 Do NOT modify selectors, do not invent unnecessary code, and follow the WCAG fix patterns.

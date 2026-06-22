@@ -16,7 +16,8 @@ import os
 
 from dotenv import load_dotenv
 
-load_dotenv(override=True)
+AGENT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+load_dotenv(dotenv_path=os.path.join(AGENT_DIR, ".env"), override=True)
 
 import google.auth
 from fastapi import FastAPI
@@ -50,7 +51,6 @@ allow_origins = (
 # Artifact bucket for ADK (created by Terraform, passed via env var)
 logs_bucket_name = os.environ.get("LOGS_BUCKET_NAME")
 
-AGENT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # In-memory session configuration - no persistent storage
 session_service_uri = None
 
