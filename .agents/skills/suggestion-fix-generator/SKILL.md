@@ -13,6 +13,10 @@ description: |
 5. Returns the output in the format: `{ "before": string, "after": string, "explanation": string }`.
 6. AI Model: gemini-3.5-flash.
 
+## Resources
+- **references/patrones_de_fix.md**: Contains the WCAG fix patterns to follow when suggesting corrections.
+- **Note**: There are no scripts in this skill. The LLM must perform the refactoring itself directly without attempting to run any script.
+
 ## When NOT to activate this skill
 
 - If the `finding` does not clearly state a resolvable vulnerability or issue in the code.
