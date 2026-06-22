@@ -21,12 +21,12 @@ This checklist outlines the sequential migration and development steps to consol
 - [x] Migrate the deterministic guardrail that validates and blocks any navigation to sources not registered in `ALLOWED_SOURCES` (authorized demo sites or raw HTML content).
 
 ### Phase 4: Workflow Graph in `app/agent.py`
-- [ ] Define the `Auditor` and `Refactorizador` agents in `app/agent.py`.
-- [ ] Implement the orchestration workflow using the ADK 2.0 Workflow API (connecting the Auditor's findings output to the Refactorizador's input).
+- [x] Define the `Auditor` and `Refactorizador` agents in `app/agent.py`.
+- [x] Implement the orchestration workflow using the ADK 2.0 Workflow API (connecting the Auditor's findings output to the Refactorizador's input).
 
 ### Phase 5: MCP Server and FastAPI Interface
-- [ ] Set up the GitHub reader MCP server in `mcp_server/github_server.py`.
-- [ ] Develop the FastAPI application in `app/fast_api_app.py` to serve the premium web UI, allowing users to run audits on demo sites or raw HTML, and view the final `AuditReport` with suggested fixes.
+- [x] Set up the GitHub reader MCP server in `mcp_server/github_server.py`.
+- [x] Develop the FastAPI application in `app/fast_api_app.py` to serve the premium web UI, allowing users to run audits on demo sites or raw HTML, and view the final `AuditReport` with suggested fixes.
 
 ### Phase 6: Evaluations and Unit Testing
 - [ ] Add pytest test cases under `tests/` to validate the security runner and the 6 deterministic skills.

@@ -22,9 +22,9 @@ async function runAudit() {
                 resultsContent.innerHTML = '<p>No accessibility issues found! 🎉</p>';
             } else {
                 fixes.forEach(fix => {
-                    const fixEl = document.createElement('div');
-                    fixEl.className = 'fix-card';
-                    fixEl.innerHTML = `
+                    const fixElement = document.createElement('div');
+                    fixElement.className = 'fix-card';
+                    fixElement.innerHTML = `
                         <h3>Finding ID: ${fix.finding_id || "N/A"}</h3>
                         <p><strong>Explanation:</strong> ${fix.explanation || "N/A"}</p>
                         <h4>Before:</h4>
@@ -32,7 +32,7 @@ async function runAudit() {
                         <h4>After:</h4>
                         <div class="code-block">${escapeHtml(fix.after || "N/A")}</div>
                     `;
-                    resultsContent.appendChild(fixEl);
+                    resultsContent.appendChild(fixElement);
                 });
             }
         } else {

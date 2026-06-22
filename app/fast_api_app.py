@@ -14,19 +14,17 @@
 import os
 
 import google.auth
-from fastapi import FastAPI, Request
-from google.adk.cli.fast_api import get_fast_api_app
-from google.cloud import logging as google_cloud_logging
-from fastapi.staticfiles import StaticFiles
+from fastapi import FastAPI
 from fastapi.responses import FileResponse, JSONResponse
-from pydantic import BaseModel
-
+from fastapi.staticfiles import StaticFiles
+from google.adk.cli.fast_api import get_fast_api_app
 from google.adk.runners import InMemoryRunner
+from google.cloud import logging as google_cloud_logging
 from google.genai import types
+from pydantic import BaseModel
 
 from app.agent import app as adk_app
 from app.app_utils.security import validate_input_before_audit
-
 from app.app_utils.telemetry import setup_telemetry
 from app.app_utils.typing import Feedback
 
@@ -72,19 +70,23 @@ def collect_feedback(feedback: Feedback) -> dict[str, str]:
     logger.log_struct(feedback.model_dump(), severity="INFO")
     return {"status": "success"}
 
+
 # --- Bondy Web UI & API ---
 if not os.path.exists("web"):
     os.makedirs("web")
 
 app.mount("/static", StaticFiles(directory="web"), name="static")
 
+
 class AuditRequest(BaseModel):
     source: str
     raw_html: str | None = None
 
+
 @app.get("/bondy")
 async def bondy_ui():
     return FileResponse("web/index.html")
+
 
 @app.post("/api/audit")
 async def run_audit(req: AuditRequest):
@@ -92,25 +94,29 @@ async def run_audit(req: AuditRequest):
         validate_input_before_audit(req.source, req.raw_html)
     except ValueError as e:
         return JSONResponse({"status": "error", "message": str(e)}, status_code=403)
-        
+
     try:
         runner = InMemoryRunner(app=adk_app)
-        session = await runner.session_service.create_session(app_name="app", user_id="web_user")
-        
+        session = await runner.session_service.create_session(
+            app_name="app", user_id="web_user"
+        )
+
         prompt = f"Ejecuta una auditoría de accesibilidad para la ruta/source: {req.source}\n"
         if req.raw_html:
-             prompt += f"Contenido HTML:\n{req.raw_html}"
-             
+            prompt += f"Contenido HTML:\n{req.raw_html}"
+
         final_output = None
-        
+
         async for event in runner.run_async(
             user_id="web_user",
             session_id=session.id,
-            new_message=types.Content(role="user", parts=[types.Part.from_text(text=prompt)])
+            new_message=types.Content(
+                role="user", parts=[types.Part.from_text(text=prompt)]
+            ),
         ):
             if event.output is not None:
                 final_output = event.output
-                
+
         if final_output:
             if isinstance(final_output, list):
                 try:
@@ -122,13 +128,20 @@ async def run_audit(req: AuditRequest):
                     result = final_output.model_dump()
                 except AttributeError:
                     result = final_output
-                    
+
             return {"status": "success", "data": result}
         else:
-            return JSONResponse({"status": "error", "message": "The workflow did not produce any output."}, status_code=500)
-            
+            return JSONResponse(
+                {
+                    "status": "error",
+                    "message": "The workflow did not produce any output.",
+                },
+                status_code=500,
+            )
+
     except Exception as e:
         return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
+
 
 # Main execution
 if __name__ == "__main__":
