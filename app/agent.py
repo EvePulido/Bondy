@@ -78,8 +78,19 @@ Tu salida DEBE ser estrictamente una lista de objetos FixSuggestion.""",
     tools=[refactorizador_tools]
 )
 
-# Temporal root_agent for the App (will be replaced by the Workflow graph)
+from google.adk.workflow import Workflow
+
+# ----- Orchestration Workflow -----
+root_workflow = Workflow(
+    name="AccessibilityWorkflow",
+    edges=[
+        ('START', auditor_agent),
+        (auditor_agent, refactorizador_agent)
+    ],
+    description="Workflow que orquesta la auditoría de accesibilidad y luego la generación de sugerencias de refactorización automáticas."
+)
+
 app = App(
-    root_agent=auditor_agent,
+    root_agent=root_workflow,
     name="app",
 )
