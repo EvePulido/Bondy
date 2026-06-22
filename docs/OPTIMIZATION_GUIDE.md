@@ -23,15 +23,14 @@ empezar a escribir) y la factura de la API.
 
 ### 3. El estándar de oro: Agentes Especializados (Multi-Agent Design)
 
-En lugar de tener un "Agente Generalista Gigante" con 10 habilidades, la arquitectura recomendada a gran escala es tener
-múltiples sub-agentes pequeños especializados:
+En lugar de tener un "Agente Generalista Gigante" con todas las habilidades, Bondy implementa una arquitectura de subagentes especializados y concurrentes de forma predeterminada en su grafo de Workflow:
 
-- Un agente para imágenes (solo con 2 habilidades de imagen).
-- Un agente para formularios (solo con la habilidad de formularios).
-- Un agente para navegación (solo con habilidades de Playwright).
+* **`ImageAuditor`**: Encargado exclusivamente de imágenes y textos alternativos (2 habilidades).
+* **`FormAuditor`**: Encargado de verificar etiquetas de formulario (1 habilidad).
+* **`KeyboardAuditor`**: Simula y valida la navegación del foco por teclado (2 habilidades).
+* **`DocAuditor`**: Valida metadatos estructurales, idioma, nombres accesibles de elementos y contrastes (3 habilidades).
 
-Al modularizar tus habilidades (ya sea moviendo las carpetas de  skills  o dividiendo a tus agentes en el código del
-Workflow), estás aplicando las mejores prácticas de la industria para construir agentes robustos y eficientes.
+Al dividir el flujo en subagentes paralelos y concurrentes, estás aplicando las mejores prácticas de la industria para construir sistemas de agentes robustos, reduciendo drásticamente el consumo de tokens de entrada al enviar solo las descripciones de las herramientas relevantes a cada agente en particular.
 
 ---
 

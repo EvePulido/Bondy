@@ -4,15 +4,15 @@
 
 ## 🚀 Features
 
-- **Autonomous Agent Workflow**: A dual-agent architecture (Auditor + Refactorizador) connected via ADK Workflows.
+- **Autonomous Agent Workflow**: A multi-agent concurrent architecture featuring specialized subagents (Image, Form, Keyboard, and Document Structure) synchronized via ADK 2.0 Workflows.
 - **Deterministic Skills**: 6 highly specialized, deterministic accessibility skills that execute locally via Playwright (e.g., Focus Trap Detection, Contrast Calculation).
 - **Security Guardrails**: Input validation to ensure only authorized local environments or raw HTML are scanned.
 - **Local-First AI**: Runs flawlessly using Google AI Studio API Keys (`gemini-flash-latest`), perfect for local deployments without complex GCP architectures.
 
 ## 📁 Architecture & Workflow
 
-1. **Auditor Agent**: Uses Playwright and multimodal vision tools to scan a target directory or raw HTML and generates `Finding` reports.
-2. **Refactorizador Agent**: Consumes the findings and generates precise code modifications (`FixSuggestion`) based on WCAG patterns.
+1. **Specialized Auditor Agents**: Four concurrent subagents (`ImageAuditor`, `FormAuditor`, `KeyboardAuditor`, and `DocAuditor`) use Playwright and multimodal vision tools to scan a target directory or raw HTML, generating findings. These outputs are synchronized via a `JoinNode` and aggregated.
+2. **Refactorizador Agent**: Consumes the aggregated findings and generates precise code modifications (`FixSuggestion`) based on WCAG patterns.
 
 ## 🛠️ Quick Start
 
