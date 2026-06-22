@@ -11,8 +11,40 @@
 
 ## 📁 Architecture & Workflow
 
-1. **Specialized Auditor Agents**: Four concurrent subagents (`ImageAuditor`, `FormAuditor`, `KeyboardAuditor`, and `DocAuditor`) use Playwright and multimodal vision tools to scan a target directory or raw HTML, generating findings. These outputs are synchronized via a `JoinNode` and aggregated.
-2. **Refactorizador Agent**: Consumes the aggregated findings and generates precise code modifications (`FixSuggestion`) based on WCAG patterns.
+Bondy uses a multi-agent concurrent architecture where four specialized auditor agents run in parallel to scan the page, synchronize their findings at a join node, and pass them to a refactoring agent.
+
+```mermaid
+flowchart TD
+    U[User / HTML Input] -->|Sanitization & Guardrails| G[Pre-LLM Security Guardrail]
+    G --> START[Workflow START]
+    START --> IA[ImageAuditor]
+    START --> FA[FormAuditor]
+    START --> KA[KeyboardAuditor]
+    START --> DA[DocAuditor]
+    
+    IA --> JN[JoinAudits \n JoinNode]
+    FA --> JN
+    KA --> JN
+    DA --> JN
+    
+    JN --> MN[merge_findings \n Function Node]
+    MN --> R[Refactorizador Agent]
+    R --> HTML[FastAPI Web Interface]
+```
+
+### Subagent and Skill Mapping
+
+| Agent | Associated Skill | Skill Type | Responsibility | WCAG Criterion |
+| :--- | :--- | :--- | :--- | :--- |
+| **`ImageAuditor`** | `alt-text-quality-analyzer` | Gemini Multimodal Vision | Analyzes image context against alt text | 1.1.1 (Non-text Content) |
+| | `image-decorator-classifier` | Gemini Multimodal Vision | Classifies if an image is purely decorative | 1.1.1 (Non-text Content) |
+| **`FormAuditor`** | `form-labels-validator` | Deterministic (DOM Parsing) | Audits missing associations in input tags | 1.3.1 / 4.1.2 (Labels) |
+| **`KeyboardAuditor`**| `focus-order-validator` | Playwright Simulation | Detects illogical focus orders and jumps | 2.4.3 (Focus Order) |
+| | `focus-trap-detector` | Playwright Simulation | Detects keyboard focus traps in components | 2.1.2 (No Focus Trap) |
+| **`DocAuditor`** | `document-language-validator`| Deterministic (DOM Parsing) | Validates root `<html>` lang attribute | 3.1.1 (Language of Page) |
+| | `text-contrast-calculator` | Mathematical Formula | Calculates text contrast against backgrounds | 1.4.3 (Contrast) |
+| | `interactive-elements-validator`| Deterministic (DOM Parsing) | Identifies empty links or button tags | 2.4.4 / 4.1.2 (Name/Role) |
+| **`Refactorizador`** | `suggestion-fix-generator` | Gemini Text Refactoring | Generates clean HTML replacement code | N/A |
 
 ## 🛠️ Quick Start
 
@@ -43,14 +75,7 @@ Launch the built-in FastAPI server to access the Bondy Web UI:
    ```
    Go to `http://localhost:8000/bondy` to interact with the agent.
 
----
 
-## ⚙️ Quota & Token Optimization
-
-Since the Gemini Free Tier has strict rate limits (especially for requests per minute and per day), please review the [Optimization Guide](file:///C:/Users/evely/OneDrive/Desktop/Bondy/bondy/docs/OPTIMIZATION_GUIDE.md) to learn how to:
-- Dynamically limit active skills to reduce token overhead.
-- Design targeted local demo pages.
-- Handle contrast validation without compromising production CSS practices.
 
 ## 🧪 Testing
 

@@ -35,7 +35,7 @@ uv run python -m uvicorn app.fast_api_app:app --reload
 
 ### Phase 7: Delivery and Release Closure
 - [ ] Set up the GitHub Actions CI/CD workflow in `.github/workflows/bondy-audit.yml`.
-- [ ] Write the comprehensive repository `README.md` containing architecture overview, installation, and usage instructions.
+- [x] Write the comprehensive repository `README.md` containing architecture overview, installation, and usage instructions.
 - [ ] Record the 5-minute project demonstration video.
 - [ ] Write the final Kaggle essay/writeup.
 
@@ -43,6 +43,17 @@ uv run python -m uvicorn app.fast_api_app:app --reload
 - [x] Analyze and mitigate Google AI Studio Free Tier rate limits by migrating to `gemini-3.1-flash-lite` (15 RPM / 500 RPD) and adding explicit `read_local_file` tool to the agent.
 - [x] Implement backend retry loops with automatic sleep in `run_audit` when `429 RESOURCE_EXHAUSTED` occurs.
 - [x] Fix LLM resource load failures by explicitly documenting files and adding no-script notes in LLM-based skills.
-- [ ] Redesign the localhost:8000 web interface:
-  - [ ] Change the UI style to be more accessible, modern, clean, and pleasing to the eye (following WCAG contrast and readability standards).
-  - [ ] Ensure the web application handles loading, success, and error feedback states gracefully.
+- [x] Restructure Auditor into four specialized concurrent subagents (Image, Form, Keyboard, Doc) using ADK 2.0 `JoinNode` and `merge_findings` node to optimize token overhead and speed.
+- [x] Configure ruff `line-ending = 'native'` and codespell ignore patterns in `pyproject.toml` to ensure 100% clean local and CI linting.
+- [ ] Overhaul and redesign the localhost:8000 web interface to be modern, intuitive, and highly accessible:
+  - [ ] Rebuild the UI visual style following WCAG 2.2 AA contrast and typography guidelines to guarantee high readability.
+  - [ ] Integrate three visualization themes/modes: Light Mode (default), Dark Mode, and High Contrast Mode.
+  - [ ] Handle loading (with interactive steps indicating active subagents), success, and error feedback states gracefully.
+  - [ ] Implement accessible checkboxes to dynamically parameterize the audit, allowing the user to select and run only specific subagents.
+
+### Phase 9: Google Cloud Migration & API Logger Fixes
+- [ ] Correct the `/feedback` logging fallback in `app/fast_api_app.py` to prevent `AttributeError` when Google Cloud credentials are not initialized locally.
+- [ ] Create a Google Cloud billing account and project (`bondy-accessibility-auditor`).
+- [ ] Enable the Vertex AI API in GCP.
+- [ ] Authenticate developer machine using `gcloud auth application-default login`.
+- [ ] Configure `.env` with `GOOGLE_CLOUD_PROJECT` and `GOOGLE_CLOUD_LOCATION` to route traffic through Vertex AI, unlocking `agents-cli eval run`.

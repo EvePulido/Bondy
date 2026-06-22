@@ -45,6 +45,9 @@ lint = [
 line-length = 88
 target-version = "py311"
 
+[tool.ruff.format]
+line-ending = "native"
+
 [tool.ruff.lint]
 select = [
     "E",   # pycodestyle
