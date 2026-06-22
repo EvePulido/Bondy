@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ruff: noqa: E402
+import asyncio
 import os
 
 from dotenv import load_dotenv
@@ -106,52 +107,82 @@ async def run_audit(req: AuditRequest):
     except ValueError as e:
         return JSONResponse({"status": "error", "message": str(e)}, status_code=403)
 
-    try:
-        runner = InMemoryRunner(app=adk_app)
-        session = await runner.session_service.create_session(
-            app_name="app", user_id="web_user"
-        )
-
-        prompt = f"Ejecuta una auditoría de accesibilidad para la ruta/source: {req.source}\n"
-        if req.raw_html:
-            prompt += f"Contenido HTML:\n{req.raw_html}"
-
-        final_output = None
-
-        async for event in runner.run_async(
-            user_id="web_user",
-            session_id=session.id,
-            new_message=types.Content(
-                role="user", parts=[types.Part.from_text(text=prompt)]
-            ),
-        ):
-            if event.output is not None:
-                final_output = event.output
-
-        if final_output:
-            if isinstance(final_output, list):
-                try:
-                    result = [f.model_dump() for f in final_output]
-                except AttributeError:
-                    result = final_output
-            else:
-                try:
-                    result = final_output.model_dump()
-                except AttributeError:
-                    result = final_output
-
-            return {"status": "success", "data": result}
-        else:
-            return JSONResponse(
-                {
-                    "status": "error",
-                    "message": "The workflow did not produce any output.",
-                },
-                status_code=500,
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            runner = InMemoryRunner(app=adk_app)
+            session = await runner.session_service.create_session(
+                app_name="app", user_id="web_user"
             )
 
-    except Exception as e:
-        return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
+            prompt = f"Ejecuta una auditoría de accesibilidad para la ruta/source: {req.source}\n"
+            if req.raw_html:
+                prompt += f"Contenido HTML:\n{req.raw_html}"
+
+            final_output = None
+
+            async for event in runner.run_async(
+                user_id="web_user",
+                session_id=session.id,
+                new_message=types.Content(
+                    role="user", parts=[types.Part.from_text(text=prompt)]
+                ),
+            ):
+                if event.output is not None:
+                    final_output = event.output
+
+            if final_output:
+                if isinstance(final_output, list):
+                    try:
+                        result = [f.model_dump() for f in final_output]
+                    except AttributeError:
+                        result = final_output
+                else:
+                    try:
+                        result = final_output.model_dump()
+                    except AttributeError:
+                        result = final_output
+
+                return {"status": "success", "data": result}
+            else:
+                return JSONResponse(
+                    {
+                        "status": "error",
+                        "message": "The workflow did not produce any output.",
+                    },
+                    status_code=500,
+                )
+
+        except Exception as e:
+            err_msg = str(e)
+            if "429" in err_msg or "RESOURCE_EXHAUSTED" in err_msg:
+                if attempt < max_retries - 1:
+                    import re
+
+                    wait_sec = 5.0
+                    match = re.search(r"retry in (\d+\.?\d*)s", err_msg)
+                    if match:
+                        wait_sec = float(match.group(1)) + 1.0
+                    elif "retryDelay" in err_msg:
+                        match_delay = re.search(r"retryDelay': '(\d+)s'", err_msg)
+                        if match_delay:
+                            wait_sec = float(match_delay.group(1)) + 1.0
+
+                    try:
+                        logger.warning(
+                            f"Rate limit hit (429). Retrying in {wait_sec} seconds... (Attempt {attempt + 1}/{max_retries})"
+                        )
+                    except Exception:
+                        print(
+                            f"Rate limit hit (429). Retrying in {wait_sec} seconds... (Attempt {attempt + 1}/{max_retries})"
+                        )
+
+                    await asyncio.sleep(wait_sec)
+                    continue
+
+            return JSONResponse(
+                {"status": "error", "message": err_msg}, status_code=500
+            )
 
 
 # Main execution
