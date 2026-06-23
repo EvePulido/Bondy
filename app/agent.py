@@ -111,6 +111,7 @@ image_auditor = LlmAgent(
 Use your tools to check if image elements have valid alt attributes or if they are decorative.
 Output must be strictly a list of Finding objects.""",
     output_key="findings",
+    output_schema=list[Finding],
     tools=[image_tools, read_local_file],
 )
 
@@ -121,6 +122,7 @@ form_auditor = LlmAgent(
 Use your tools to check if text fields, select tags, checkboxes, and textareas have associated labels.
 Output must be strictly a list of Finding objects.""",
     output_key="findings",
+    output_schema=list[Finding],
     tools=[form_tools, read_local_file],
 )
 
@@ -131,6 +133,7 @@ keyboard_auditor = LlmAgent(
 Use your tools to simulate tab cycles and identify focus traps or illogical tab orders.
 Output must be strictly a list of Finding objects.""",
     output_key="findings",
+    output_schema=list[Finding],
     tools=[keyboard_tools, read_local_file],
 )
 
@@ -141,6 +144,7 @@ doc_auditor = LlmAgent(
 Use your tools to check page language, color contrast, and empty links/buttons.
 Output must be strictly a list of Finding objects.""",
     output_key="findings",
+    output_schema=list[Finding],
     tools=[doc_tools, read_local_file],
 )
 
@@ -152,6 +156,7 @@ Your sole responsibility is to take the merged list of error reports (Findings) 
 Do NOT modify selectors, do not invent unnecessary code, and follow the WCAG fix patterns.
 Your output MUST be strictly a list of FixSuggestion objects.""",
     output_key="fixes",
+    output_schema=list[FixSuggestion],
     tools=[refactorizador_tools],
 )
 
@@ -201,7 +206,13 @@ root_workflow = Workflow(
 
 root_agent = root_workflow
 
+from google.adk.agents.context_cache_config import ContextCacheConfig
+
 app = App(
     root_agent=root_agent,
     name="app",
+    context_cache_config=ContextCacheConfig(
+        min_tokens=1024,
+        ttl_seconds=1800,
+    )
 )

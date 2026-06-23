@@ -39,7 +39,14 @@ def get_safe_demo_path(source: str) -> str:
     """
     validate_input_before_audit(source)
     base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-    safe_path = os.path.join(base_dir, source, "index.html")
+    
+    # Previene la duplicación si el agente ya incluyó index.html en la ruta
+    clean_src = source.replace("\\", "/")
+    if clean_src.endswith("index.html"):
+        safe_path = os.path.join(base_dir, source)
+    else:
+        safe_path = os.path.join(base_dir, source, "index.html")
+        
     if not os.path.exists(safe_path):
         raise FileNotFoundError(f"The demo site file does not exist at: {safe_path}")
     return safe_path

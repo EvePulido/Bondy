@@ -59,7 +59,7 @@ artifact_service_uri = f"gs://{logs_bucket_name}" if logs_bucket_name else None
 
 app: FastAPI = get_fast_api_app(
     agents_dir=AGENT_DIR,
-    web=True,
+    web=False,
     artifact_service_uri=artifact_service_uri,
     allow_origins=allow_origins,
     session_service_uri=session_service_uri,
@@ -95,8 +95,8 @@ class AuditRequest(BaseModel):
     raw_html: str | None = None
 
 
-@app.get("/bondy")
-async def bondy_ui():
+@app.get("/")
+async def root_ui():
     return FileResponse("web/index.html")
 
 
@@ -189,4 +189,4 @@ async def run_audit(req: AuditRequest):
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="127.0.0.1", port=8080)
