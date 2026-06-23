@@ -115,12 +115,21 @@ async def run_audit(req: AuditRequest):
                 app_name="app", user_id="web_user"
             )
 
-            prompt = f"Ejecuta una auditoría de accesibilidad para la ruta/source: {req.source}\n"
             if req.raw_html:
-                prompt += f"Contenido HTML:\n{req.raw_html}"
+                prompt = (
+                    f"Audit the following raw HTML content for accessibility issues:\n\n"
+                    f"{req.raw_html}"
+                )
+            else:
+                prompt = (
+                    f"Run a full accessibility audit on the demo site at: {req.source}\n"
+                    f"Call read_local_file(file_path='{req.source}') to read the HTML, "
+                    f"then audit all WCAG criteria and return a FixesReport with all the fixes."
+                )
 
-            final_output = None
+            import json as _json
 
+            last_text = None
             async for event in runner.run_async(
                 user_id="web_user",
                 session_id=session.id,
@@ -128,30 +137,33 @@ async def run_audit(req: AuditRequest):
                     role="user", parts=[types.Part.from_text(text=prompt)]
                 ),
             ):
-                if event.output is not None:
-                    final_output = event.output
+                # Capture the last text response from the agent
+                if hasattr(event, "content") and event.content:
+                    for part in event.content.parts:
+                        if hasattr(part, "text") and part.text:
+                            last_text = part.text
 
-            if final_output:
-                if isinstance(final_output, list):
-                    try:
-                        result = [f.model_dump() for f in final_output]
-                    except AttributeError:
-                        result = final_output
-                else:
-                    try:
-                        result = final_output.model_dump()
-                    except AttributeError:
-                        result = final_output
+            if last_text:
+                # Strip markdown code fences if the model added them
+                clean = last_text.strip()
+                if clean.startswith("```"):
+                    clean = clean.split("```", 2)[-1] if clean.count("```") >= 2 else clean
+                    if clean.startswith("json"):
+                        clean = clean[4:]
+                    clean = clean.rstrip("`").strip()
 
-                return {"status": "success", "data": result}
-            else:
-                return JSONResponse(
-                    {
-                        "status": "error",
-                        "message": "The workflow did not produce any output.",
-                    },
-                    status_code=500,
-                )
+                try:
+                    result = _json.loads(clean)
+                    if isinstance(result, dict) and "fixes" in result:
+                        result = result["fixes"]
+                    return {"status": "success", "data": result}
+                except _json.JSONDecodeError:
+                    pass
+
+            return JSONResponse(
+                {"status": "error", "message": "The workflow did not produce any output."},
+                status_code=500,
+            )
 
         except Exception as e:
             err_msg = str(e)

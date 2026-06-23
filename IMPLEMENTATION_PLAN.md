@@ -53,7 +53,53 @@ uv run python -m uvicorn app.fast_api_app:app --reload
 
 ### Phase 9: Google Cloud Migration & API Logger Fixes
 - [ ] Correct the `/feedback` logging fallback in `app/fast_api_app.py` to prevent `AttributeError` when Google Cloud credentials are not initialized locally.
-- [ ] Create a Google Cloud billing account and project (`bondy-accessibility-auditor`).
-- [ ] Enable the Vertex AI API in GCP.
-- [ ] Authenticate developer machine using `gcloud auth application-default login`.
-- [ ] Configure `.env` with `GOOGLE_CLOUD_PROJECT` and `GOOGLE_CLOUD_LOCATION` to route traffic through Vertex AI, unlocking `agents-cli eval run`.
+- [x] Create a Google Cloud billing account and project (`bondy-dev-500300`).
+- [x] Enable the Vertex AI API in GCP.
+- [x] Authenticate developer machine using `gcloud auth application-default login` with quota project `bondy-dev-500300`.
+- [x] Configure `.env` with `GOOGLE_CLOUD_PROJECT=bondy-dev-500300` and `GOOGLE_CLOUD_LOCATION=global` to route traffic through Vertex AI.
+
+### Phase 10: Architecture Simplification & End-to-End Fix ✅ (Session: 2026-06-22)
+
+> **Context for teammates:** This session resolved a series of cascading errors that prevented the audit pipeline from working end-to-end. Below is a full account of what was fixed and how.
+
+#### Problems Encountered & Resolutions
+
+| # | Error | Root Cause | Fix |
+|---|-------|-----------|-----|
+| 1 | `404 NOT_FOUND` (publisher model) | Region `us-central1` does not serve `gemini-3.1-flash-lite` | Set `GOOGLE_CLOUD_LOCATION=global` in `.env` |
+| 2 | `FileNotFoundError` (duplicated path) | `get_safe_demo_path()` was appending `index.html` to a path that already ended with it | Added check in `security.py` to skip appending when path already ends in `index.html` |
+| 3 | `400 INVALID_ARGUMENT` (Context Cache) | Demo HTML files are ~891 tokens; Vertex AI requires ≥4096 to cache | Removed `ContextCacheConfig` from `agent.py` |
+| 4 | `LlmCallsLimitExceededError: 500` | Agents had `output_schema=list[Finding]`. Model returned `{"findings":[...]}` (an object), ADK rejected it, model retried — infinite loop | Wrapped in `FindingsReport` / `FixesReport` BaseModels |
+| 5 | `TypeError: Object of type Finding is not JSON serializable` | `merge_findings` node returned a raw Python list of Pydantic objects; ADK could not serialize it to pass to the next node | Changed return type to `FindingsReport` (a full BaseModel) |
+| 6 | `429 RESOURCE_EXHAUSTED` | 4 parallel agents saturated the Vertex AI rate limit instantly | Added `max_concurrency=1` to the Workflow |
+| 7 | Agent returns "No issues found" (false negative) | In the parallel Workflow, each sub-agent received the user message as free text but had **no explicit context** about which file to read. Model skipped tool calls | Full redesign: replaced the 4-agent Workflow with a **single `LlmAgent`** with step-by-step instructions |
+| 8 | `set_model_response_tool` ValidationError | ADK's internal `output_schema` mechanism (`set_model_response_tool`) failed silently when validating nested Pydantic lists | **Removed `output_schema` and `output_key` entirely.** Agent now returns plain JSON text; backend parses it with `json.loads()` |
+
+#### Final Architecture
+
+The agent is now a single `LlmAgent` named `BondyAccessibilityAgent` with:
+- All 9 skills available as tools (`SkillToolset`)
+- `read_local_file` tool for secure HTML access (validated via `security.py`)
+- Explicit step-by-step instruction to call `read_local_file` first, audit WCAG 1.1.1 / 1.3.1 / 1.4.3 / 2.4.4 / 3.1.1, then return a raw JSON array
+- No `output_schema` — the FastAPI endpoint captures `event.content.parts[].text` and parses JSON manually
+
+#### Files Modified
+
+- `app/agent.py` — complete rewrite: single `LlmAgent`, no Workflow, no `output_schema`
+- `app/fast_api_app.py` — `/api/audit` endpoint: captures last text event, strips markdown fences, parses JSON
+- `app/app_utils/security.py` — fixed `index.html` path duplication bug
+- `web/index.html`, `web/index.css`, `web/app.js` — premium dark-mode UI with Before/After fix cards
+- `.env` — `GOOGLE_CLOUD_LOCATION=global`
+
+#### How to Run Locally
+
+```bash
+uv sync
+uv run python -m uvicorn app.fast_api_app:app --reload --port 8080
+# Open http://localhost:8080, select a demo site, click Run Audit
+```
+
+#### Key Lesson
+
+> ADK 2.0's `output_schema` with nested Pydantic models is experimental and unreliable. For production, instruct the model to return **plain JSON text** and parse it manually in the backend.
+
