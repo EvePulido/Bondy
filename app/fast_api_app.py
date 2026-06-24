@@ -130,7 +130,7 @@ async def run_audit(req: AuditRequest):
                 checks_str = ", ".join(req.enabled_checks)
                 extra_instruction = f"Only audit the following criteria: {checks_str}. Ignore all other criteria."
             else:
-                extra_instruction = "Audit all criteria (WCAG 1.1.1, WCAG 1.3.1, WCAG 1.4.3, WCAG 2.4.4, WCAG 3.1.1)."
+                extra_instruction = "Audit all criteria (WCAG 1.1.1, WCAG 1.3.1, WCAG 1.4.3, WCAG 2.4.4, WCAG 3.1.1, WCAG 2.1.2, WCAG 2.4.3)."
 
             if req.raw_html:
                 prompt = (

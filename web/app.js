@@ -152,7 +152,11 @@ async function runAudit() {
     const enabledChecks = [];
     if (checkedBoxes.includes('images')) enabledChecks.push('WCAG 1.1.1');
     if (checkedBoxes.includes('forms')) enabledChecks.push('WCAG 1.3.1');
-    if (checkedBoxes.includes('keyboard')) enabledChecks.push('WCAG 2.4.4');
+    if (checkedBoxes.includes('keyboard')) {
+        enabledChecks.push('WCAG 2.4.4');
+        enabledChecks.push('WCAG 2.1.2');
+        enabledChecks.push('WCAG 2.4.3');
+    }
     if (checkedBoxes.includes('contrast')) {
         enabledChecks.push('WCAG 1.4.3');
         enabledChecks.push('WCAG 3.1.1');
@@ -334,7 +338,7 @@ async function runAudit() {
             const passedCount = Math.max(0, baseChecksCount - criticalCount - warningCount);
             const score = fixes.length === 0 ? 100 : Math.max(0, 100 - (criticalCount * 15 + warningCount * 7));
 
-            const circumference = 2 * Math.PI * 38; // Radius 38, ~238.76
+            const circumference = 2 * Math.PI * 48; // Radius 48, ~301.59
             const dashLength = (score / 100) * circumference;
             const strokeDashArray = `${dashLength.toFixed(1)} ${circumference.toFixed(1)}`;
 
@@ -351,49 +355,44 @@ async function runAudit() {
             if (classifiedFixes.length === 0) {
                 findingsHtml = `
                     <div class="text-center py-5" style="border: 2px solid var(--border-color); border-radius: 20px; background: var(--card-bg);">
-                        <span class="material-symbols-outlined text-success" style="font-size: 56px; color: #10b981;">check_circle</span>
-                        <h3 class="mt-3" style="font-weight: 700; color: var(--text-color);">No issues found! 🎉</h3>
-                        <p class="text-muted" style="color: var(--text-muted);">The selected files meet the configured accessibility criteria.</p>
+                        <span class="material-symbols-outlined text-success" style="font-size: 56px; color: var(--severity-passed);">check_circle</span>
+                        <h3 class="mt-3" style="font-weight: 700; color: var(--text-color);">No issues found!</h3>
+                        <p style="color: var(--text-muted);">The selected files meet the configured accessibility criteria.</p>
                     </div>
                 `;
             } else {
                 classifiedFixes.forEach((fix, idx) => {
                     findingsHtml += `
-                        <div class="card" style="border-radius: 20px; margin-bottom: 12px; overflow: hidden;">
+                        <div class="card finding-card">
                             <div class="finding-header" onclick="toggleFinding(this)" role="button" tabindex="0">
-                                <svg class="chevron closed" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-                                    <polyline points="6 9 12 15 18 9" />
-                                </svg>
-                                <span class="badge wcag">${escapeHtml(fix.wcag)}</span>
+                                <span class="badge wcag">WCAG ${escapeHtml(fix.wcag)}</span>
                                 <span class="badge ${escapeHtml(fix.severity)}">${escapeHtml(fix.severity.charAt(0).toUpperCase() + fix.severity.slice(1))}</span>
                                 <span class="finding-title" title="${escapeHtml(fix.title)}">${escapeHtml(fix.title)}</span>
-                                <span class="finding-agent">${escapeHtml(fix.agent)}</span>
+                                <span class="material-symbols-outlined chevron open">expand_more</span>
                             </div>
-                            <div class="finding-body" style="display: none;">
-                                <p class="finding-desc">${escapeHtml(fix.desc)}</p>
+                            <div class="finding-body" style="display: flex;">
+                                <p class="finding-desc" style="margin-bottom: 6px;">${escapeHtml(fix.desc)}</p>
+                                <div class="fix-explanation" style="margin-bottom: 16px;">
+                                    <strong>Explanation:</strong> ${escapeHtml(fix.explanation)}
+                                </div>
                                 <div class="code-grid">
                                     <div class="code-block-wrap">
                                         <div class="code-head">
                                             <span class="code-label old">Original — Error</span>
-                                            <button class="btn-sec btn-copy" onclick="event.stopPropagation(); copyText(\`${escapeDoubleBackticks(fix.before)}\`, this)">Copy</button>
+                                            <button class="btn-sec btn-copy" onclick="event.stopPropagation(); copyText(this.closest('.code-block-wrap').querySelector('code').textContent, this)"><span class="material-symbols-outlined" style="font-size: 14px; vertical-align: middle; margin-right: 4px; line-height: 1;">content_copy</span>Copy</button>
                                         </div>
                                         <pre class="code-box before"><code>${escapeHtml(fix.before)}</code></pre>
                                     </div>
                                     <div class="code-block-wrap">
                                         <div class="code-head">
                                             <span class="code-label new">Suggested Fix</span>
-                                            <button class="btn-sec btn-copy" onclick="event.stopPropagation(); copyText(\`${escapeDoubleBackticks(fix.after)}\`, this)">Copy</button>
+                                            <button class="btn-sec btn-copy" onclick="event.stopPropagation(); copyText(this.closest('.code-block-wrap').querySelector('code').textContent, this)"><span class="material-symbols-outlined" style="font-size: 14px; vertical-align: middle; margin-right: 4px; line-height: 1;">content_copy</span>Copy</button>
                                         </div>
                                         <pre class="code-box after"><code>${escapeHtml(fix.after)}</code></pre>
                                     </div>
                                 </div>
-                                <div class="fix-explanation" style="margin-top: 8px;">
-                                    <strong>Explanation:</strong> ${escapeHtml(fix.explanation)}
-                                </div>
-                                <button class="btn-apply" onclick="event.stopPropagation(); applyFix(\`${escapeDoubleBackticks(fix.after)}\`, this)">
-                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:middle; margin-right:6px;">
-                                        <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />
-                                    </svg>
+                                <button class="btn-apply" onclick="event.stopPropagation(); applyFix(this.closest('.finding-body').querySelector('.code-box.after code').textContent, this)">
+                                    <span class="material-symbols-outlined" style="font-size: 18px; vertical-align: middle; margin-right: 6px; line-height: 1;">build</span>
                                     Apply Fix
                                 </button>
                             </div>
@@ -404,7 +403,7 @@ async function runAudit() {
 
             // Inject Results screen
             dynamicScreen.innerHTML = `
-                <div class="results-container" style="max-width: 860px; margin: 0 auto; padding-bottom: 60px;">
+                <div class="results-container" style="width: 100%; margin: 0 auto; padding-bottom: 60px;">
                     <div class="stack" style="display: flex; flex-direction: column; gap: 20px;">
                         
                         <!-- Config summary strip -->
@@ -415,64 +414,55 @@ async function runAudit() {
                                 <span class="strip-dot">·</span>
                                 ${pillsHtml}
                             </div>
-                            <button class="btn-sec" onclick="resetToConfigure()">
-                                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="vertical-align: middle; margin-right: 4px;">
-                                    <polyline points="1 4 1 10 7 10" />
-                                    <path d="M3.51 15a9 9 0 1 0 .49-3.36" />
-                                </svg>
+                            <button class="btn-primary" onclick="resetToConfigure()">
+                                <span class="material-symbols-outlined" style="font-size: 20px; vertical-align: middle; margin-right: 6px; line-height: 1;">refresh</span>
                                 New audit
                             </button>
                         </div>
 
                         <!-- Summary widget -->
-                        <div class="card card-pad" style="padding: 24px; border-radius: 20px;">
-                            <div class="section-label" style="margin-bottom: 16px;">Audit Summary</div>
-                            <div class="summary-widget">
-                                <div class="score-ring">
-                                    <svg width="96" height="96" viewBox="0 0 96 96">
-                                        <circle cx="48" cy="48" r="38" fill="none" stroke="var(--border-color)" stroke-width="9" />
-                                        <circle cx="48" cy="48" r="38" fill="none" stroke="var(--primary-color)" stroke-width="9"
-                                            stroke-linecap="round" stroke-dasharray="${strokeDashArray}" transform="rotate(-90 48 48)" />
-                                    </svg>
-                                    <div class="score-inner">
-                                        <span class="score-num">${score}%</span>
-                                        <span class="score-lbl">score</span>
-                                    </div>
-                                </div>
-                                <div class="stat-grid">
-                                    <div class="stat-card critical">
-                                        <div class="stat-head">
-                                            <svg class="stat-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                                <circle cx="12" cy="12" r="10" />
-                                                <line x1="12" y1="8" x2="12" y2="12" />
-                                                <line x1="12" y1="16" x2="12.01" y2="16" />
-                                            </svg>
-                                            <span>Critical</span>
+                        <div class="card summary-card">
+                            <div class="card-header" style="cursor: default;">
+                                <div class="section-label">Audit Summary</div>
+                            </div>
+                            <div class="card-content-wrap">
+                                <div class="summary-widget">
+                                    <div class="score-ring">
+                                        <svg width="120" height="120" viewBox="0 0 120 120">
+                                            <circle cx="60" cy="60" r="48" fill="none" stroke="var(--border-color)" stroke-width="11" />
+                                            <circle cx="60" cy="60" r="48" fill="none" stroke="var(--primary-color)" stroke-width="11"
+                                                stroke-linecap="round" stroke-dasharray="${strokeDashArray}" transform="rotate(-90 60 60)" />
+                                        </svg>
+                                        <div class="score-inner">
+                                            <span class="score-num">${score}%</span>
+                                            <span class="score-lbl">score</span>
                                         </div>
-                                        <div class="stat-num">${criticalCount}</div>
-                                        <div class="stat-sub">errors</div>
                                     </div>
-                                    <div class="stat-card warning">
-                                        <div class="stat-head">
-                                            <svg class="stat-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
-                                                <line x1="12" y1="9" x2="12" y2="13" />
-                                                <line x1="12" y1="17" x2="12.01" y2="17" />
-                                            </svg>
-                                            <span>Warnings</span>
+                                    <div class="stat-grid">
+                                        <div class="stat-card critical">
+                                            <div class="stat-head">
+                                                <span class="material-symbols-outlined stat-icon" aria-hidden="true">error</span>
+                                                <span>Critical</span>
+                                            </div>
+                                            <div class="stat-num">${criticalCount}</div>
+                                            <div class="stat-sub">Errors</div>
                                         </div>
-                                        <div class="stat-num">${warningCount}</div>
-                                        <div class="stat-sub">warnings</div>
-                                    </div>
-                                    <div class="stat-card passed">
-                                        <div class="stat-head">
-                                            <svg class="stat-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-                                            </svg>
-                                            <span>Passed</span>
+                                        <div class="stat-card warning">
+                                            <div class="stat-head">
+                                                <span class="material-symbols-outlined stat-icon" aria-hidden="true">warning</span>
+                                                <span>Warnings</span>
+                                            </div>
+                                            <div class="stat-num">${warningCount}</div>
+                                            <div class="stat-sub">Warnings</div>
                                         </div>
-                                        <div class="stat-num">${passedCount}</div>
-                                        <div class="stat-sub">checks</div>
+                                        <div class="stat-card passed">
+                                            <div class="stat-head">
+                                                <span class="material-symbols-outlined stat-icon" aria-hidden="true">check_circle</span>
+                                                <span>Passed</span>
+                                            </div>
+                                            <div class="stat-num">${passedCount}</div>
+                                            <div class="stat-sub">Checks</div>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
@@ -644,17 +634,13 @@ function escapeHtml(unsafe) {
          .replace(/'/g, "&#039;");
 }
 
-function escapeDoubleBackticks(str) {
-    if (!str) return "";
-    return str
-        .replace(/\\/g, '\\\\')
-        .replace(/`/g, '\\`')
-        .replace(/\$/g, '\\$');
-}
+
+
 
 // Expose functions globally to be called from dynamically injected markup
 window.toggleFinding = toggleFinding;
 window.copyText = copyText;
 window.applyFix = applyFix;
 window.resetToConfigure = resetToConfigure;
+
 
