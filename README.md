@@ -107,12 +107,20 @@ flowchart TD
    ```bash
    uv run playwright install --with-deps chromium
    ```
-3. Authenticate with Google Cloud (Vertex AI) since this project routes traffic globally to handle rate limits:
+3. Create a Google Cloud Project (if you don't have one):
+   - Go to the [Google Cloud Console (console.cloud.google.com)](https://console.cloud.google.com/).
+   - Create a new project and copy its **Project ID**.
+   - Make sure to enable the **Vertex AI API** in the APIs & Services section for that project.
+4. Authenticate with Google Cloud locally since this project routes traffic globally to handle rate limits:
    ```bash
    gcloud auth application-default login
+   gcloud auth application-default set-quota-project your-google-cloud-project-id
    ```
-4. Create a `.env` file in the root directory and configure it with your own Google Cloud Project ID:
+5. Create a `.env` file in the root directory (you can copy `.env.example`) and configure it with your own Google Cloud Project ID:
    ```env
+   # Force ADK to use Vertex AI instead of standard Gemini API
+   GOOGLE_GENAI_USE_VERTEXAI=True
+   
    # Replace with your own Google Cloud Project ID that has the Vertex AI API enabled
    GOOGLE_CLOUD_PROJECT=your-google-cloud-project-id
    GOOGLE_CLOUD_LOCATION=global
