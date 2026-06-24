@@ -103,3 +103,17 @@ uv run python -m uvicorn app.fast_api_app:app --reload --port 8080
 
 > ADK 2.0's `output_schema` with nested Pydantic models is experimental and unreliable. For production, instruct the model to return **plain JSON text** and parse it manually in the backend.
 
+---
+
+### Phase 11: Dynamic Loader Layout & High-Contrast Theme Fixes ✅ (Session: 2026-06-23)
+- [x] Restructure loader screen layout:
+  - [x] Place loader spinner, Running title, and audited site name inside the white card container.
+  - [x] Arrange contents in a side-by-side two-column responsive grid: left column has the spinner and title, right column has the capsule steps list.
+  - [x] Simplify scanning step texts in English (e.g., "Analyzing images...").
+  - [x] Display status icons (sync, check_circle, pending) next to capsule text inside the pill-shaped elements.
+  - [x] Compress vertical space by adjusting margins of container and loader wrapper.
+  - [x] Remove max-width constraint on loader card so it matches the width of the main configuration card.
+- [ ] Implement and adapt the design of the last page (accessibility report).
+- [ ] Fix the hover effect of the theme selector dropdown in High Contrast Mode.
+
+
