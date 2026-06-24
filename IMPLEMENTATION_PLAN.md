@@ -34,7 +34,7 @@ uv run python -m uvicorn app.fast_api_app:app --reload
 - [x] Set up `eval_config.yaml` and run `agents-cli eval run` (SKIPPED: `agents-cli eval` requires a Vertex AI GCP Project, incompatible with local AI Studio keys).
 
 ### Phase 7: Delivery and Release Closure
-- [ ] Set up the GitHub Actions CI/CD workflow in `.github/workflows/bondy-audit.yml`.
+- [x] Set up the GitHub Actions CI/CD workflow in `.github/workflows/bondy-audit.yml`.
 - [x] Write the comprehensive repository `README.md` containing architecture overview, installation, and usage instructions.
 - [ ] Record the 5-minute project demonstration video.
 - [ ] Write the final Kaggle essay/writeup.
@@ -45,14 +45,14 @@ uv run python -m uvicorn app.fast_api_app:app --reload
 - [x] Fix LLM resource load failures by explicitly documenting files and adding no-script notes in LLM-based skills.
 - [x] Restructure Auditor into four specialized concurrent subagents (Image, Form, Keyboard, Doc) using ADK 2.0 `JoinNode` and `merge_findings` node to optimize token overhead and speed.
 - [x] Configure ruff `line-ending = 'native'` and codespell ignore patterns in `pyproject.toml` to ensure 100% clean local and CI linting.
-- [ ] Overhaul and redesign the localhost:8000 web interface to be modern, intuitive, and highly accessible:
-  - [ ] Rebuild the UI visual style following WCAG 2.2 AA contrast and typography guidelines to guarantee high readability.
-  - [ ] Integrate three visualization themes/modes: Light Mode (default), Dark Mode, and High Contrast Mode.
-  - [ ] Handle loading (with interactive steps indicating active subagents), success, and error feedback states gracefully.
-  - [ ] Implement accessible checkboxes to dynamically parameterize the audit, allowing the user to select and run only specific subagents.
+- [x] Overhaul and redesign the localhost:8080 web interface to be modern, intuitive, and highly accessible:
+  - [x] Rebuild the UI visual style following WCAG 2.2 AA contrast and typography guidelines to guarantee high readability.
+  - [x] Integrate three visualization themes/modes: Light Mode (default), Dark Mode, and High Contrast Mode.
+  - [x] Handle loading (with interactive steps indicating active subagents), success, and error feedback states gracefully.
+  - [x] Implement accessible checkboxes to dynamically parameterize the audit, allowing the user to select and run only specific subagents.
 
 ### Phase 9: Google Cloud Migration & API Logger Fixes
-- [ ] Correct the `/feedback` logging fallback in `app/fast_api_app.py` to prevent `AttributeError` when Google Cloud credentials are not initialized locally.
+- [x] Correct the `/feedback` logging fallback in `app/fast_api_app.py` to prevent `AttributeError` when Google Cloud credentials are not initialized locally.
 - [x] Create a Google Cloud billing account and project (`bondy-dev-500300`).
 - [x] Enable the Vertex AI API in GCP.
 - [x] Authenticate developer machine using `gcloud auth application-default login` with quota project `bondy-dev-500300`.

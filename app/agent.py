@@ -46,13 +46,15 @@ class FixSuggestion(BaseModel):
     after: str
     explanation: str
 
+
 class FindingsReport(BaseModel):
     findings: list[Finding]
+
 
 class FixesReport(BaseModel):
     fixes: list[FixSuggestion]
 
-    @field_validator('fixes', mode='before')
+    @field_validator("fixes", mode="before")
     @classmethod
     def parse_fix_strings(cls, v):
         """Tolerates fixes sent as JSON strings by the LLM instead of dicts."""
@@ -133,7 +135,4 @@ Do NOT wrap the JSON in markdown code blocks. Return raw JSON only.
     tools=[all_tools, read_local_file],
 )
 
-app = App(
-    root_agent=root_agent,
-    name="app"
-)
+app = App(root_agent=root_agent, name="app")
