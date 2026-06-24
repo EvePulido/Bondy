@@ -79,7 +79,17 @@ def collect_feedback(feedback: Feedback) -> dict[str, str]:
     Returns:
         Success message
     """
-    logger.log_struct(feedback.model_dump(), severity="INFO")
+    if hasattr(logger, "log_struct"):
+        try:
+            logger.log_struct(feedback.model_dump(), severity="INFO")
+        except Exception as e:
+            import logging
+
+            logging.getLogger(__name__).info(
+                f"Feedback received (GCP logging failed: {e}): {feedback.model_dump()}"
+            )
+    else:
+        logger.info(f"Feedback received: {feedback.model_dump()}")
     return {"status": "success"}
 
 
@@ -93,6 +103,7 @@ app.mount("/static", StaticFiles(directory="web"), name="static")
 class AuditRequest(BaseModel):
     source: str
     raw_html: str | None = None
+    enabled_checks: list[str] | None = None
 
 
 @app.get("/")
@@ -115,16 +126,23 @@ async def run_audit(req: AuditRequest):
                 app_name="app", user_id="web_user"
             )
 
+            if req.enabled_checks:
+                checks_str = ", ".join(req.enabled_checks)
+                extra_instruction = f"Only audit the following criteria: {checks_str}. Ignore all other criteria."
+            else:
+                extra_instruction = "Audit all criteria (WCAG 1.1.1, WCAG 1.3.1, WCAG 1.4.3, WCAG 2.4.4, WCAG 3.1.1, WCAG 2.1.2, WCAG 2.4.3)."
+
             if req.raw_html:
                 prompt = (
                     f"Audit the following raw HTML content for accessibility issues:\n\n"
-                    f"{req.raw_html}"
+                    f"{req.raw_html}\n\n"
+                    f"{extra_instruction}"
                 )
             else:
                 prompt = (
                     f"Run a full accessibility audit on the demo site at: {req.source}\n"
                     f"Call read_local_file(file_path='{req.source}') to read the HTML, "
-                    f"then audit all WCAG criteria and return a FixesReport with all the fixes."
+                    f"then audit the following criteria: {extra_instruction} and return a FixesReport with all the fixes."
                 )
 
             import json as _json
@@ -147,7 +165,9 @@ async def run_audit(req: AuditRequest):
                 # Strip markdown code fences if the model added them
                 clean = last_text.strip()
                 if clean.startswith("```"):
-                    clean = clean.split("```", 2)[-1] if clean.count("```") >= 2 else clean
+                    clean = (
+                        clean.split("```", 2)[-1] if clean.count("```") >= 2 else clean
+                    )
                     if clean.startswith("json"):
                         clean = clean[4:]
                     clean = clean.rstrip("`").strip()
@@ -161,7 +181,10 @@ async def run_audit(req: AuditRequest):
                     pass
 
             return JSONResponse(
-                {"status": "error", "message": "The workflow did not produce any output."},
+                {
+                    "status": "error",
+                    "message": "The workflow did not produce any output.",
+                },
                 status_code=500,
             )
 

@@ -27,34 +27,38 @@ Additionally, Bondy implements three crucial dynamic checking skills:
 
 ---
 
-## 2. Multi-Agent Workflow Architecture (ADK 2.0)
+## 2. Agent Architecture (ADK 2.0)
 
-The main orchestration flow is implemented using the official stateful graph **Workflow API** of **google-adk 2.0**. We employ a concurrent multi-agent design with four specialized auditors that execute in parallel and feed their reports into a synchronizing join node before code refactoring:
+To avoid Vertex AI rate limits (429 RESOURCE_EXHAUSTED) caused by concurrent subagents, the architecture was simplified and optimized into a **single LlmAgent** design. 
+
+The `BondyAccessibilityAgent` acts as a monolithic orchestrator equipped with a robust `SkillToolset`. It sequentially evaluates the input source and executes its toolkit.
 
 ```mermaid
 flowchart TD
-    U[User / HTML Input] -->|Sanitization & Guardrails| G[Pre-LLM Security Guardrail]
-    G --> START[Workflow START]
-    START --> IA[ImageAuditor]
-    START --> FA[FormAuditor]
-    START --> KA[KeyboardAuditor]
-    START --> DA[DocAuditor]
+    UI[FastAPI Web Interface] -->|URL or HTML Snippet| SEC{Security Validator}
+    SEC -->|Allowed| AGENT[BondyAccessibilityAgent]
+    SEC -->|Blocked| ERR[HTTP 403 Forbidden]
     
-    IA --> JN[JoinAudits \n JoinNode]
-    FA --> JN
-    KA --> JN
-    DA --> JN
+    subgraph Agent Runtime
+        AGENT -->|Calls| PLAY[Playwright Simulator]
+        AGENT -->|Calls| DOM[DOM Parsers]
+        AGENT -->|Calls| VISION[Gemini Vision Model]
+        
+        PLAY -.->|Focus Traps & Tab Order| AGENT
+        DOM -.->|Labels & Lang Attributes| AGENT
+        VISION -.->|Contextual Alt Text & Contrast| AGENT
+    end
     
-    JN --> MN[merge_findings \n Function Node]
-    MN --> R[Refactorizador Agent]
-    R --> HTML[FastAPI Web Interface]
+    AGENT -->|Synthesizes Findings & Refactors HTML| JSON_REPORT[JSON Fixes Payload]
+    JSON_REPORT --> UI
 ```
 
-### Specialized Subagents & Responsibilities
-* **`ImageAuditor`**: Audits images and alt-text quality (WCAG 1.1.1).
-* **`FormAuditor`**: Validates form input labels (WCAG 1.3.1 / 4.1.2).
-* **`KeyboardAuditor`**: Checks keyboard accessibility, focus traps, and logical tab sequences (WCAG 2.1.2 / 2.4.3).
-* **`DocAuditor`**: Handles document language, contrast ratios, and accessible names on links/buttons (WCAG 1.4.3 / 3.1.1 / 2.4.4).
+### Specialized Skills & Responsibilities
+Instead of separate agents, the single agent has access to these deterministic and LLM-based skills:
+* **Image Skills**: Audits images and alt-text quality (WCAG 1.1.1).
+* **Form Skills**: Validates form input labels (WCAG 1.3.1 / 4.1.2).
+* **Keyboard Skills**: Checks keyboard accessibility, focus traps, and logical tab sequences (WCAG 2.1.2 / 2.4.3).
+* **Document Skills**: Handles document language, contrast ratios, and accessible names on links/buttons (WCAG 1.4.3 / 3.1.1 / 2.4.4).
 
 ### Common Data Contract Specifications
 

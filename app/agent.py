@@ -46,13 +46,15 @@ class FixSuggestion(BaseModel):
     after: str
     explanation: str
 
+
 class FindingsReport(BaseModel):
     findings: list[Finding]
+
 
 class FixesReport(BaseModel):
     fixes: list[FixSuggestion]
 
-    @field_validator('fixes', mode='before')
+    @field_validator("fixes", mode="before")
     @classmethod
     def parse_fix_strings(cls, v):
         """Tolerates fixes sent as JSON strings by the LLM instead of dicts."""
@@ -115,6 +117,7 @@ STEP 2 — Audit these WCAG criteria in the HTML:
   - WCAG 1.3.1 / 4.1.2: <input>, <select>, <textarea> — do they have a <label>?
   - WCAG 1.4.3: text color vs background contrast (4.5:1 normal, 3:1 large text)
   - WCAG 2.4.4 / 4.1.2: <a> and <button> — do they have visible text or aria-label?
+  - WCAG 2.1.2 / 2.4.3: Keyboard focus trap and logical focus order — check for illogical tabindex or modal traps.
   - WCAG 3.1.1: does <html> have a valid lang attribute?
 
 STEP 3 — Respond with ONLY a valid JSON array (no markdown, no extra text) like:
@@ -133,7 +136,4 @@ Do NOT wrap the JSON in markdown code blocks. Return raw JSON only.
     tools=[all_tools, read_local_file],
 )
 
-app = App(
-    root_agent=root_agent,
-    name="app"
-)
+app = App(root_agent=root_agent, name="app")
