@@ -49,7 +49,10 @@ Unlike traditional tools, Bondy:
 ## Features
 
 - **Autonomous Agent Workflow**: A monolithic AI Agent orchestrator (`BondyAccessibilityAgent`) equipped with a rich `SkillToolset` to sequentially evaluate inputs and bypass strict API rate limits.
-- **Deterministic Skills**: 6 highly specialized, deterministic accessibility skills that execute locally via Playwright (e.g., focus trap detection, contrast calculation).
+- **Single-Pass Modal Auditing**: Audits and generates complete, generic, and reusable modal accessibility fixes (logical DOM order, role/aria attributes, close buttons, robust focus traps, Escape handlers, background inertness, and focus restoration) in the very first scan.
+- **First-Class Contrast Calculator**: Uses a deterministic Python utility tool (`calculate_contrast_ratio`) exposed directly to the LLM to verify exact WCAG 2.0 contrast ratios of HTML/CSS text, preventing model estimation hallucinations.
+- **Robust JSON Parsing Engine**: Features a fault-tolerant JSON extraction system capable of parsing clean payloads out of arbitrary markdown code blocks and conversational commentary returned by the model.
+- **Deterministic Skills**: 6 highly specialized, deterministic accessibility skills that execute locally via Playwright (e.g., focus trap detection, HTML lang validation).
 - **Security Guardrails**: Strict input validation to ensure only authorized local environments or raw HTML snippets are scanned.
 - **Enterprise-Ready AI**: Runs robustly using Google Cloud Vertex AI, ensuring high availability and bypassing the limitations of free-tier API keys.
 
@@ -87,7 +90,7 @@ flowchart TD
 | **Keyboard Auditing**| `focus-order-validator` | Playwright Simulation | Detects illogical focus orders and jumps | 2.4.3 (Focus Order) |
 | | `focus-trap-detector` | Playwright Simulation | Detects keyboard focus traps in components | 2.1.2 (No Focus Trap) |
 | **Document Auditing** | `document-language-validator`| Deterministic (DOM Parsing) | Validates root `<html>` lang attribute | 3.1.1 (Language of Page) |
-| | `text-contrast-calculator` | Mathematical Formula | Calculates text contrast against backgrounds | 1.4.3 (Contrast) |
+| | `text-contrast-calculator` | First-Class Deterministic Tool | Calculates text contrast mathematically against backgrounds | 1.4.3 (Contrast) |
 | | `interactive-elements-validator`| Deterministic (DOM Parsing) | Identifies empty links or button tags | 2.4.4 / 4.1.2 (Name/Role) |
 | **Refactoring** | `suggestion-fix-generator` | Gemini Text Refactoring | Generates clean HTML replacement code | N/A |
 
@@ -100,23 +103,26 @@ flowchart TD
 
 ### 2. Installation & Credentials Setup
 1. Clone the repository and sync dependencies:
-   ```bash
-   uv sync
-   ```
+   * **Windows / macOS / Linux**:
+     ```bash
+     uv sync
+     ```
 2. Install Playwright browsers (required for deterministic visual/focus skills):
-   ```bash
-   uv run playwright install --with-deps chromium
-   ```
+   * **Windows / macOS / Linux**:
+     ```bash
+     uv run playwright install --with-deps chromium
+     ```
 3. Create a Google Cloud Project (if you don't have one):
    - Go to the [Google Cloud Console (console.cloud.google.com)](https://console.cloud.google.com/).
    - Create a new project and copy its **Project ID**.
    - Make sure to enable the **Vertex AI API** in the APIs & Services section for that project.
 4. Authenticate with Google Cloud locally since this project routes traffic globally to handle rate limits:
-   ```bash
-   gcloud auth application-default login
-   gcloud auth application-default set-quota-project your-google-cloud-project-id
-   ```
-5. Create a `.env` file in the root directory (you can copy `.env.example`) and configure it with your own Google Cloud Project ID:
+   * **Windows / macOS / Linux**:
+     ```bash
+     gcloud auth application-default login
+     gcloud auth application-default set-quota-project your-google-cloud-project-id
+     ```
+5. Configure your local environment variables. You can create a `.env` file in the root directory (copy `.env.example`):
    ```env
    # Force ADK to use Vertex AI instead of standard Gemini API
    GOOGLE_GENAI_USE_VERTEXAI=True
@@ -125,37 +131,66 @@ flowchart TD
    GOOGLE_CLOUD_PROJECT=your-google-cloud-project-id
    GOOGLE_CLOUD_LOCATION=global
    ```
+   *Alternatively, if you prefer running temporary exports in your terminal:*
+   * **Windows (PowerShell)**:
+     ```powershell
+     $env:GOOGLE_GENAI_USE_VERTEXAI="True"
+     $env:GOOGLE_CLOUD_PROJECT="your-google-cloud-project-id"
+     ```
+   * **macOS / Linux (Bash/Zsh)**:
+     ```bash
+     export GOOGLE_GENAI_USE_VERTEXAI="True"
+     export GOOGLE_CLOUD_PROJECT="your-google-cloud-project-id"
+     ```
 
 ### 3. Run the API and Web UI Locally
 Launch the built-in FastAPI server to access the Bondy Web UI:
-   ```bash
-   uv run python -m uvicorn app.fast_api_app:app --reload --port 8080
-   ```
-   Go to `http://localhost:8080` to interact with the agent.
+* **Windows / macOS / Linux**:
+  ```bash
+  uv run python -m uvicorn app.fast_api_app:app --reload --port 8080
+  ```
+  Go to `http://localhost:8080` to interact with the agent.
 
 ### 4. Deployment to Google Cloud (Optional)
 Bondy can be fully deployed to your own Google Cloud environment (Cloud Run) using the ADK `agents-cli`:
 
 1. Provision the base infrastructure (Terraform):
-   ```bash
-   agents-cli infra single-project
-   ```
+   * **Windows / macOS / Linux**:
+     ```bash
+     agents-cli infra single-project
+     ```
 2. Build and deploy the Dockerized application to Cloud Run:
-   ```bash
-   agents-cli deploy
-   ```
+   * **Windows / macOS / Linux**:
+     ```bash
+     agents-cli deploy
+     ```
 
-## Testing
+## Testing & Linting
 
-We use `pytest` for all unit and integration testing. 
+### Running Tests
+We use `pytest` for all unit and integration testing.
+* **Windows / macOS / Linux**:
+  ```bash
+  uv run pytest
+  ```
 
-```bash
-uv run pytest tests/unit tests/integration
-```
+### Code Formatting & Pre-Commit
+Verify code compliance with formatters and linters:
+* **Windows / macOS / Linux**:
+  ```bash
+  uv run pre-commit run --all-files
+  ```
+
+### Metadata and Manifest Validation
+Validate agent configurations, types, and manifests:
+* **Windows / macOS / Linux**:
+  ```bash
+  agents-cli lint
+  ```
 
 ## Security
 
-All tools strictly adhere to the project's security rules (`AGENTS.md`), preventing unauthorized web navigation and blocking directory traversal outside of the `ALLOWED_SOURCES`.
+All tools strictly adhere to the project's security rules (`AGENTS.md`), preventing directory traversal outside of the `ALLOWED_SOURCES` and restricting browser navigation.
 
 ## Contributors
 

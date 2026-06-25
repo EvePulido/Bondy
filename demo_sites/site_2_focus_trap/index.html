@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="es">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <title>Demo 2: Focus Trap & Order</title>
@@ -20,26 +20,25 @@
     </style>
 </head>
 <body>
-    <!-- Bug 2: Orden de foco ilógico.
-         El modal está al inicio del DOM con tabindex=0, 
-         por lo que recibe el foco antes de que el usuario vea el contenido principal. -->
+    <!-- Bug 2: Illogical focus order.
+         The modal was originally at the beginning of the DOM with tabindex=0, 
+         so it received focus before the user could see the main content. -->
     
 
-
     <main>
-        <h1>Contenido Principal</h1>
-        <p>Este contenido está después del modal en el DOM, creando un salto ilógico.</p>
-        <button id="btn-1">Botón Principal</button>
-        <a href="#">Enlace Principal</a>
+        <h1>Main Content</h1>
+        <p>This content is after the modal in the DOM, creating an illogical jump.</p>
+        <button id="btn-1">Main Button</button>
+        <a href="#">Main Link</a>
     </main>
-
+ 
     <div class="backdrop"></div>
     <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
-        <button id="close-modal" aria-label="Cerrar modal" style="float: right; margin-top: -10px;">×</button>
-        <h2 id="modal-title">Modal de Suscripción</h2>
-        <label for="email">Correo electrónico</label>
+        <button id="close-modal" aria-label="Close modal" style="float: right; margin-top: -10px;">×</button>
+        <h2 id="modal-title">Subscription Modal</h2>
+        <label for="email">Email address</label>
         <input type="text" id="email">
-        <button id="subscribe">Suscribirse</button>
+        <button id="subscribe">Subscribe</button>
     </div>
 
     <script>

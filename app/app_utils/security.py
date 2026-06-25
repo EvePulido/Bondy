@@ -19,12 +19,12 @@ def validate_input_before_audit(source: str, raw_html: str | None = None) -> Non
 
     # Resolución segura del path real
     base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-    
+
     # Prevenir que el os.path.join evalúe rutas absolutas maliciosas si el source empieza con / o C:\
     clean_source = source.lstrip("/\\")
     if ":" in clean_source:
         clean_source = clean_source.split(":", 1)[1].lstrip("/\\")
-        
+
     resolved_path = os.path.abspath(os.path.join(base_dir, clean_source))
 
     # El path final DEBE estar contenido dentro del base_dir para evitar Directory Traversal
@@ -34,7 +34,9 @@ def validate_input_before_audit(source: str, raw_html: str | None = None) -> Non
     is_allowed = False
     for allowed in ALLOWED_SOURCES:
         allowed_abs = os.path.abspath(os.path.join(base_dir, allowed))
-        if resolved_path == allowed_abs or resolved_path.startswith(allowed_abs + os.sep):
+        if resolved_path == allowed_abs or resolved_path.startswith(
+            allowed_abs + os.sep
+        ):
             is_allowed = True
             break
 
