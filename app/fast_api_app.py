@@ -81,7 +81,11 @@ def collect_feedback(feedback: Feedback) -> dict[str, str]:
     """
     if hasattr(logger, "log_struct"):
         try:
-            logger.log_struct(feedback.model_dump(), severity="INFO")
+            import typing
+
+            typing.cast(typing.Any, logger).log_struct(
+                feedback.model_dump(), severity="INFO"
+            )
         except Exception as e:
             import logging
 
@@ -104,6 +108,12 @@ class AuditRequest(BaseModel):
     source: str
     raw_html: str | None = None
     enabled_checks: list[str] | None = None
+
+
+class ApplyFixRequest(BaseModel):
+    file_path: str
+    before: str
+    after: str
 
 
 @app.get("/")
@@ -156,28 +166,69 @@ async def run_audit(req: AuditRequest):
                 ),
             ):
                 # Capture the last text response from the agent
-                if hasattr(event, "content") and event.content:
+                if hasattr(event, "content") and event.content and event.content.parts:
                     for part in event.content.parts:
                         if hasattr(part, "text") and part.text:
                             last_text = part.text
 
             if last_text:
-                # Strip markdown code fences if the model added them
-                clean = last_text.strip()
-                if clean.startswith("```"):
-                    clean = (
-                        clean.split("```", 2)[-1] if clean.count("```") >= 2 else clean
+                import re
+
+                def extract_json_data(text: str):
+                    clean = text.strip()
+                    try:
+                        return _json.loads(clean)
+                    except _json.JSONDecodeError:
+                        pass
+
+                    # Try finding markdown code block: ```json ... ``` or ``` ... ```
+                    pattern = re.compile(r"```(?:json)?\s*([\s\S]*?)\s*```")
+                    matches = pattern.findall(text)
+                    for match in matches:
+                        try:
+                            return _json.loads(match.strip())
+                        except _json.JSONDecodeError:
+                            pass
+
+                    # Try finding outer bounds of JSON array or object
+                    arr_start = text.find("[")
+                    arr_end = text.rfind("]")
+                    obj_start = text.find("{")
+                    obj_end = text.rfind("}")
+
+                    if (
+                        arr_start != -1
+                        and arr_end != -1
+                        and (obj_start == -1 or arr_start < obj_start)
+                    ):
+                        try:
+                            return _json.loads(text[arr_start : arr_end + 1])
+                        except _json.JSONDecodeError:
+                            pass
+
+                    if obj_start != -1 and obj_end != -1:
+                        try:
+                            return _json.loads(text[obj_start : obj_end + 1])
+                        except _json.JSONDecodeError:
+                            pass
+
+                    raise ValueError(
+                        "No valid JSON could be parsed from the agent output."
                     )
-                    if clean.startswith("json"):
-                        clean = clean[4:]
-                    clean = clean.rstrip("`").strip()
 
                 try:
-                    result = _json.loads(clean)
+                    result = extract_json_data(last_text)
                     if isinstance(result, dict) and "fixes" in result:
                         result = result["fixes"]
-                    return {"status": "success", "data": result}
-                except _json.JSONDecodeError:
+
+                    source_type = "raw_html" if req.raw_html else "local_file"
+                    return {
+                        "status": "success",
+                        "data": result,
+                        "source_type": source_type,
+                        "file_path": req.source if not req.raw_html else None,
+                    }
+                except Exception:
                     pass
 
             return JSONResponse(
@@ -218,6 +269,34 @@ async def run_audit(req: AuditRequest):
             return JSONResponse(
                 {"status": "error", "message": err_msg}, status_code=500
             )
+
+
+@app.post("/api/apply-fix")
+async def apply_fix(req: ApplyFixRequest):
+    from app.app_utils.security import get_safe_demo_path
+
+    try:
+        safe_path = get_safe_demo_path(req.file_path)
+        with open(safe_path, encoding="utf-8") as f:
+            content = f.read()
+
+        if req.before not in content:
+            return JSONResponse(
+                {
+                    "status": "error",
+                    "message": "Original code not found in file. Ensure the file hasn't been modified externally.",
+                },
+                status_code=400,
+            )
+
+        content = content.replace(req.before, req.after, 1)
+
+        with open(safe_path, "w", encoding="utf-8") as f:
+            f.write(content)
+
+        return {"status": "success", "message": "Fix applied successfully"}
+    except Exception as e:
+        return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
 
 
 # Main execution

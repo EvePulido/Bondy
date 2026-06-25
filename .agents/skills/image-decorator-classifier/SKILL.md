@@ -13,7 +13,7 @@ description: |
 5. AI Model: gemini-3.5-flash.
 
 ## Resources
-- **references/decorativa_vs_informativa.md**: Contains guidance on classifying decorative vs informative images.
+- **references/decorative_vs_informative.md**: Contains guidance on classifying decorative vs informative images.
 - **Note**: There are no scripts in this skill. The LLM must perform the classification itself directly without attempting to run any script.
 
 ## When NOT to activate this skill

@@ -462,7 +462,7 @@ body {
 
 .radio-group {
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(auto-fit, minmax(285px, 1fr));
     gap: 12px;
 }
 
@@ -476,6 +476,7 @@ body {
     cursor: pointer;
     transition: all 0.15s ease;
     background-color: var(--card-bg);
+    min-width: 0;
 }
 
 .radio-label:hover {
@@ -513,6 +514,7 @@ body {
     font-size: 14px;
     color: var(--text-muted);
     margin-top: 4px;
+    word-break: break-all;
 }
 
 .field-label {

@@ -6,7 +6,7 @@
     <style>
         body { font-family: sans-serif; padding: 20px; }
         .modal {
-            display: block;
+            display: none;
             position: fixed;
             top: 50%; left: 50%;
             transform: translate(-50%, -50%);
@@ -24,13 +24,7 @@
          El modal está al inicio del DOM con tabindex=0, 
          por lo que recibe el foco antes de que el usuario vea el contenido principal. -->
     
-    <div class="backdrop"></div>
-    <div class="modal" role="dialog" tabindex="0">
-        <h2>Modal de Suscripción</h2>
-        <input type="text" id="email" placeholder="Correo electrónico">
-        <button id="subscribe">Suscribirse</button>
-        <!-- Bug 1: Modal sin manejo de Escape ni botón de cierre alcanzable por teclado -->
-    </div>
+
 
     <main>
         <h1>Contenido Principal</h1>
@@ -39,28 +33,79 @@
         <a href="#">Enlace Principal</a>
     </main>
 
-    <script>
-        // Simulamos la trampa de foco explícitamente interceptando la tecla Tab
-        const modal = document.querySelector('.modal');
-        const focusableElements = modal.querySelectorAll('input, button, [tabindex="0"]');
-        const firstElement = focusableElements[0];
-        const lastElement = focusableElements[focusableElements.length - 1];
+    <div class="backdrop"></div>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+        <button id="close-modal" aria-label="Cerrar modal" style="float: right; margin-top: -10px;">×</button>
+        <h2 id="modal-title">Modal de Suscripción</h2>
+        <label for="email">Correo electrónico</label>
+        <input type="text" id="email">
+        <button id="subscribe">Suscribirse</button>
+    </div>
 
-        modal.addEventListener('keydown', function(e) {
-            if (e.key === 'Tab') {
+    <script>
+        const modal = document.querySelector('.modal');
+        const backdrop = document.querySelector('.backdrop');
+        const openModalButton = document.getElementById('btn-1');
+        const closeModalButton = document.getElementById('close-modal');
+        const mainContent = document.querySelector('main');
+        let triggerElement = null;
+
+        const focusableSelector = 'a[href], area[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), button:not([disabled]), iframe, object, embed, [tabindex]:not([tabindex="-1"]), [contenteditable]';
+
+        function closeModal() {
+            modal.style.display = 'none';
+            backdrop.style.display = 'none';
+            if (mainContent) mainContent.removeAttribute('aria-hidden');
+            if (triggerElement) {
+                triggerElement.focus();
+                triggerElement = null;
+            }
+        }
+
+        function openModal() {
+            triggerElement = document.activeElement;
+            modal.style.display = 'block';
+            backdrop.style.display = 'block';
+            if (mainContent) mainContent.setAttribute('aria-hidden', 'true');
+            
+            // Focus the first element in the modal, which is the close button in the refactored HTML
+            const focusableElements = modal.querySelectorAll(focusableSelector);
+            if (focusableElements.length > 0) {
+                focusableElements[0].focus();
+            }
+        }
+
+        // Event listeners for opening and closing
+        openModalButton.addEventListener('click', openModal);
+        closeModalButton.addEventListener('click', closeModal);
+        backdrop.addEventListener('click', closeModal);
+
+        // Focus Trap and Escape Key Handling
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape' && modal.style.display !== 'none') {
+                closeModal();
+                return;
+            }
+
+            if (e.key === 'Tab' && modal.style.display !== 'none') {
+                const focusables = modal.querySelectorAll(focusableSelector);
+                if (focusables.length === 0) return;
+
+                const first = focusables[0];
+                const last = focusables[focusables.length - 1];
+
                 if (e.shiftKey) { // Shift + Tab
-                    if (document.activeElement === firstElement) {
+                    if (document.activeElement === first) {
                         e.preventDefault();
-                        lastElement.focus();
+                        last.focus();
                     }
                 } else { // Tab
-                    if (document.activeElement === lastElement) {
+                    if (document.activeElement === last) {
                         e.preventDefault();
-                        firstElement.focus();
+                        first.focus();
                     }
                 }
             }
-            // NO hay manejo de tecla "Escape" intencionalmente
         });
     </script>
 </body>

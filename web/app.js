@@ -321,6 +321,8 @@ async function runAudit() {
 
         if (data.status === 'success') {
             const fixes = data.data || [];
+            const sourceType = data.source_type;
+            const filePath = data.file_path || '';
             
             // Map and classify findings
             let criticalCount = 0;
@@ -372,9 +374,11 @@ async function runAudit() {
                             </div>
                             <div class="finding-body" style="display: flex;">
                                 <p class="finding-desc" style="margin-bottom: 6px;">${escapeHtml(fix.desc)}</p>
+                                ${fix.explanation && fix.explanation !== fix.desc ? `
                                 <div class="fix-explanation" style="margin-bottom: 16px;">
                                     <strong>Explanation:</strong> ${escapeHtml(fix.explanation)}
                                 </div>
+                                ` : ''}
                                 <div class="code-grid">
                                     <div class="code-block-wrap">
                                         <div class="code-head">
@@ -391,10 +395,12 @@ async function runAudit() {
                                         <pre class="code-box after"><code>${escapeHtml(fix.after)}</code></pre>
                                     </div>
                                 </div>
-                                <button class="btn-apply" onclick="event.stopPropagation(); applyFix(this.closest('.finding-body').querySelector('.code-box.after code').textContent, this)">
+                                ${sourceType === 'local_file' ? `
+                                <button class="btn-apply" onclick="event.stopPropagation(); applyFix(this.closest('.finding-body'), '${escapeHtml(filePath)}', this)">
                                     <span class="material-symbols-outlined" style="font-size: 18px; vertical-align: middle; margin-right: 6px; line-height: 1;">build</span>
-                                    Apply Fix
+                                    Apply to File
                                 </button>
+                                ` : ''}
                             </div>
                         </div>
                     `;
@@ -557,22 +563,60 @@ async function copyText(text, btn) {
     }
 }
 
-async function applyFix(text, btn) {
+async function applyFix(findingBody, filePath, btn) {
     try {
-        await navigator.clipboard.writeText(text);
+        const beforeText = findingBody.querySelector('.code-box.before code').textContent;
+        const afterText = findingBody.querySelector('.code-box.after code').textContent;
+
         const originalText = btn.innerHTML;
-        btn.innerHTML = `<span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">check</span> Fix Copied!`;
-        btn.classList.add('btn-success');
+        btn.innerHTML = `<span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;margin-right:4px;">sync</span> Applying...`;
+        
+        const response = await fetch('/api/apply-fix', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                file_path: filePath,
+                before: beforeText,
+                after: afterText
+            })
+        });
+        
+        const result = await response.json();
+
+        if (result.status === 'success') {
+            btn.innerHTML = `<span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">check</span> Fixed!`;
+            btn.classList.add('btn-success');
+        } else {
+            console.error('Failed to apply fix:', result.message);
+            btn.innerHTML = `<span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">error</span> Failed`;
+            btn.classList.add('btn-error');
+        }
+
         setTimeout(() => {
             btn.innerHTML = originalText;
-            btn.classList.remove('btn-success');
-        }, 2000);
+            btn.classList.remove('btn-success', 'btn-error');
+        }, 3000);
     } catch (err) {
-        console.error('Failed to copy: ', err);
+        console.error('Error applying fix: ', err);
+        btn.innerHTML = `Error`;
+        setTimeout(() => {
+            btn.innerHTML = originalText;
+            btn.classList.remove('btn-success', 'btn-error');
+        }, 2000);
     }
 }
 
 function classifyFinding(fix) {
+    if (fix.wcag && fix.title) {
+        return {
+            wcag: fix.wcag,
+            severity: fix.severity || 'warning',
+            title: fix.title,
+            agent: 'AccessibilityAuditor',
+            desc: fix.explanation || 'Accessibility issue detected.'
+        };
+    }
+
     const id = (fix.finding_id || '').toLowerCase();
     const exp = (fix.explanation || '').toLowerCase();
     const before = (fix.before || '').toLowerCase();
