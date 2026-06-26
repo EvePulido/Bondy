@@ -31,19 +31,16 @@ def validate_input_before_audit(source: str, raw_html: str | None = None) -> Non
     if not resolved_path.startswith(base_dir):
         raise ValueError("Access denied (Security Module). Path traversal detected.")
 
-    is_allowed = False
-    for allowed in ALLOWED_SOURCES:
-        allowed_abs = os.path.abspath(os.path.join(base_dir, allowed))
-        if resolved_path == allowed_abs or resolved_path.startswith(
-            allowed_abs + os.sep
-        ):
-            is_allowed = True
-            break
+    # Permitir cualquier archivo o directorio contenido dentro de la carpeta 'demo_sites'
+    demo_sites_abs = os.path.abspath(os.path.join(base_dir, "demo_sites"))
+    is_allowed = resolved_path == demo_sites_abs or resolved_path.startswith(
+        demo_sites_abs + os.sep
+    )
 
     if not is_allowed:
         raise ValueError(
             f"Access denied (Security Module). Source not allowed: {source}. "
-            f"Please use an authorized demo site or input raw HTML content directly."
+            f"Please use a path inside the 'demo_sites' folder or input raw HTML content directly."
         )
 
 
