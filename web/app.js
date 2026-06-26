@@ -233,6 +233,10 @@ async function runAudit() {
                             <div>
                                 <div class="running-title" style="font-size: 1.25rem; font-weight: 700; color: var(--text-color);">Running accessibility audit…</div>
                                 <div class="running-sub" style="font-size: 0.95rem; color: var(--text-muted); margin-top: 4px;">${escapeHtml(sourceName)}</div>
+                                
+                                <div class="running-warning" style="font-size: 0.85rem; color: var(--text-muted); margin-top: 12px; font-style: italic;">
+                                    <span class="material-symbols-outlined" style="font-size: 14px; vertical-align: middle; margin-right: 4px;">info</span>Deep AI analysis may take a few minutes.
+                                </div>
                             </div>
                         </div>
                         
