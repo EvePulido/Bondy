@@ -130,23 +130,53 @@ def verify_image_alt_text(url: str, current_alt: str) -> str:
         A description from the vision model of what the image actually contains.
     """
     import urllib.request
+    import os
+    import mimetypes
     from google.genai import Client, types
 
     try:
         if not url.startswith("http"):
-            return "Error: Local or invalid URLs cannot be fetched. Assume the alt text needs review."
+            base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+            demo_sites_dir = os.path.join(base_dir, "demo_sites")
+            found_path = None
+            target_suffix = url.replace("/", os.sep)
 
-        req = urllib.request.Request(url, headers={"User-Agent": "Bondy/1.0"})
-        with urllib.request.urlopen(req, timeout=10) as response:
-            image_data = response.read()
-            mime_type = response.headers.get_content_type()
+            for root_dir, _, files in os.walk(demo_sites_dir):
+                for file in files:
+                    full_path = os.path.join(root_dir, file)
+                    if full_path.endswith(target_suffix):
+                        found_path = full_path
+                        break
+                if found_path:
+                    break
+
+            if not found_path or not os.path.exists(found_path):
+                return f"Error: Local image not found for '{url}'. Assume the alt text needs review."
+
+            with open(found_path, "rb") as f:
+                image_data = f.read()
+
+            mime_type, _ = mimetypes.guess_type(found_path)
             if not mime_type or not mime_type.startswith("image/"):
                 mime_type = "image/jpeg"
+        else:
+            req = urllib.request.Request(url, headers={"User-Agent": "Bondy/1.0"})
+            with urllib.request.urlopen(req, timeout=10) as response:
+                image_data = response.read()
+                mime_type = response.headers.get_content_type()
+                if not mime_type or not mime_type.startswith("image/"):
+                    mime_type = "image/jpeg"
 
         client = Client()
         image_part = types.Part.from_bytes(data=image_data, mime_type=mime_type)
 
-        prompt = f"Look at this image. The current alt text is '{current_alt}'. What does the image actually show? Provide a highly descriptive and concise summary of the visual content so an auditor can write a good alt text."
+        prompt = (
+            f"Look at this image. The current alt text is '{current_alt}'. "
+            "ANTI-OVER-OPTIMIZATION RULE: If the current alt text is already reasonably accurate, descriptive, "
+            "and captures the core essence of the image, simply reply with: 'The current alt text is good and does not need changes.' "
+            "Do not suggest stylistic improvements or minor additions if the core meaning is already conveyed. "
+            "ONLY describe the image and suggest changes if the current alt text is missing, completely wrong, or overly generic (like 'image' or 'photo')."
+        )
 
         res = client.models.generate_content(
             model="gemini-2.5-flash", contents=[image_part, prompt]
@@ -154,61 +184,6 @@ def verify_image_alt_text(url: str, current_alt: str) -> str:
         return f"Vision Analysis Result: {res.text}"
     except Exception as e:
         return f"Error analyzing image: {str(e)}"
-
-
-def calculate_contrast_ratio(fg_color: str, bg_color: str) -> str:
-    """Calculates the exact WCAG 2.0 contrast ratio between a foreground color and a background color.
-
-    Use this tool whenever you need to check or verify contrast ratios (e.g., for WCAG 1.4.3)
-    in styles, CSS classes, or HTML attributes. NEVER estimate or guess contrast ratios yourself.
-
-    Args:
-        fg_color: The text color (hex like '#767676' or rgb like 'rgb(118,118,118)').
-        bg_color: The background color (hex like '#ffffff' or rgb like 'rgb(255,255,255)').
-    """
-
-    def parse_color(c):
-        c_clean = c.strip()
-        if c_clean.startswith("#"):
-            c_clean = c_clean.lstrip("#")
-            if len(c_clean) == 3:
-                c_clean = "".join([x * 2 for x in c_clean])
-            try:
-                return tuple(int(c_clean[i : i + 2], 16) for i in (0, 2, 4))
-            except Exception:
-                return (0, 0, 0)
-        if c_clean.startswith("rgb"):
-            parts = (
-                c_clean.replace("rgba(", "")
-                .replace("rgb(", "")
-                .replace(")", "")
-                .split(",")
-            )
-            if len(parts) >= 3:
-                try:
-                    return (
-                        int(parts[0].strip()),
-                        int(parts[1].strip()),
-                        int(parts[2].strip()),
-                    )
-                except Exception:
-                    pass
-        return (0, 0, 0)
-
-    def luminance(r, g, b):
-        a = [v / 255.0 for v in [r, g, b]]
-        a = [v / 12.92 if v <= 0.03928 else ((v + 0.055) / 1.055) ** 2.4 for v in a]
-        return a[0] * 0.2126 + a[1] * 0.7152 + a[2] * 0.0722
-
-    fg_rgb = parse_color(fg_color)
-    bg_rgb = parse_color(bg_color)
-    l1 = luminance(*fg_rgb)
-    l2 = luminance(*bg_rgb)
-    lighter = max(l1, l2)
-    darker = min(l1, l2)
-    ratio = (lighter + 0.05) / (darker + 0.05)
-
-    return f"Contrast Ratio: {round(ratio, 2)}:1 (passes normal: {ratio >= 4.5}, passes large: {ratio >= 3.0})"
 
 
 # ----- Main Accessibility Agent -----
@@ -228,7 +203,7 @@ STEP 2 — Audit these WCAG criteria in the HTML:
     IMPORTANT THRESHOLD: If the current alt text is already accurate and descriptive based on the visual verification, DO NOT report it as a failure just to make stylistic improvements (e.g., making it slightly more concise). Only report an issue if the alt text is missing, completely inaccurate, or contains the forbidden redundant phrases.
   - WCAG 1.3.1 / 4.1.2: <input>, <select>, <textarea> — do they have a <label>?
   - WCAG 1.4.3: text color vs background contrast (4.5:1 normal, 3:1 large text).
-    CRITICAL: For checking contrast ratios, you MUST call the `calculate_contrast_ratio` tool with the text foreground and background colors. NEVER guess or estimate the contrast ratio yourself. If the calculated ratio passes the WCAG AA limit (>= 4.5:1), do NOT report it as an issue.
+    CRITICAL: For checking contrast ratios, you MUST call the `text-contrast-calculator` tool with the raw HTML string content. It will launch Playwright, compute all styles automatically, and return a JSON list of any elements failing the 4.5:1 (normal) or 3:1 (large) contrast ratio limits. You MUST report any issues it returns.
   - WCAG 2.4.4 / 4.1.2: <a> and <button> — do they have visible text or aria-label?
   - WCAG 2.1.2 / 2.4.3: Keyboard focus trap and logical focus order.
     CRITICAL: You MUST use the `focus_trap_detector` and `focus_order_validator` tools to physically test the keyboard behavior of the page. Do NOT try to guess focus issues just by reading the raw HTML text. Provide complete patches for both HTML and JS if issues are found.
@@ -275,7 +250,6 @@ Do NOT wrap the JSON in markdown code blocks. Return raw JSON only.
         all_tools,
         read_local_file,
         verify_image_alt_text,
-        calculate_contrast_ratio,
     ],
 )
 

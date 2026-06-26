@@ -336,12 +336,33 @@ async function runAudit() {
             });
 
             // Calculate scoring details
-            const baseChecksCount = checkedBoxes.length * 10;
-            const passedCount = Math.max(0, baseChecksCount - criticalCount - warningCount);
-            const score = fixes.length === 0 ? 100 : Math.max(0, 100 - (criticalCount * 15 + warningCount * 7));
+            // Simulate a proportional scoring system (like Lighthouse's weighted averages)
+            // We estimate 8 critical interactive/media elements per selected category.
+            const estimatedElementsPerCategory = 8;
+            const totalEstimatedElements = checkedBoxes.length * estimatedElementsPerCategory;
+            
+            // Critical errors deduct 1 full point (100% failure for that element)
+            // Warnings deduct 0.5 points (50% failure for that element)
+            const totalErrorsWeight = criticalCount + (warningCount * 0.5);
+            
+            // Calculate the proportion of passed elements
+            let calculatedScore = ((totalEstimatedElements - totalErrorsWeight) / totalEstimatedElements) * 100;
+            
+            // Bound the score tightly between 0 and 100
+            const score = fixes.length === 0 ? 100 : Math.max(0, Math.min(100, Math.round(calculatedScore)));
+            
+            // Update the passed count UI to reflect this estimation logic
+            const passedCount = Math.max(0, totalEstimatedElements - Math.ceil(totalErrorsWeight));
+            const baseChecksCount = totalEstimatedElements;
 
             const circumference = 2 * Math.PI * 48; // Radius 48, ~301.59
-            const dashLength = (score / 100) * circumference;
+            let dashLength = (score / 100) * circumference;
+            
+            // Compensate for SVG stroke-linecap="round" which hides small gaps (stroke-width=11)
+            if (score > 0 && score < 100) {
+                dashLength = Math.min(dashLength, circumference - 15);
+                dashLength = Math.max(dashLength, 1);
+            }
             const strokeDashArray = `${dashLength.toFixed(1)} ${circumference.toFixed(1)}`;
 
             // Build checkboxes badges
@@ -586,16 +607,20 @@ async function applyFix(findingBody, filePath, btn) {
         if (result.status === 'success') {
             btn.innerHTML = `<span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">check</span> Fixed!`;
             btn.classList.add('btn-success');
+            btn.disabled = true;
+            btn.style.opacity = '0.8';
+            btn.style.cursor = 'default';
         } else {
             console.error('Failed to apply fix:', result.message);
             btn.innerHTML = `<span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;">error</span> Failed`;
             btn.classList.add('btn-error');
+            
+            // Only revert the button state on failure so the user can try again
+            setTimeout(() => {
+                btn.innerHTML = originalText;
+                btn.classList.remove('btn-success', 'btn-error');
+            }, 3000);
         }
-
-        setTimeout(() => {
-            btn.innerHTML = originalText;
-            btn.classList.remove('btn-success', 'btn-error');
-        }, 3000);
     } catch (err) {
         console.error('Error applying fix: ', err);
         btn.innerHTML = `Error`;

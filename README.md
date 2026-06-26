@@ -14,8 +14,10 @@ Bondy leverages large language models and deterministic Playwright routines to s
 - [Features](#features)
 - [Architecture & Workflow](#architecture--workflow)
 - [Quick Start](#quick-start)
-- [Testing](#testing)
+- [Testing & Linting](#testing--linting)
 - [Security](#security)
+- [Contributors](#contributors)
+- [References](#references)
 
 ---
 
@@ -50,7 +52,7 @@ Unlike traditional tools, Bondy:
 
 - **Autonomous Agent Workflow**: A monolithic AI Agent orchestrator (`BondyAccessibilityAgent`) equipped with a rich `SkillToolset` to sequentially evaluate inputs and bypass strict API rate limits.
 - **Single-Pass Modal Auditing**: Audits and generates complete, generic, and reusable modal accessibility fixes (logical DOM order, role/aria attributes, close buttons, robust focus traps, Escape handlers, background inertness, and focus restoration) in the very first scan.
-- **First-Class Contrast Calculator**: Uses a deterministic Python utility tool (`calculate_contrast_ratio`) exposed directly to the LLM to verify exact WCAG 2.0 contrast ratios of HTML/CSS text, preventing model estimation hallucinations.
+- **Playwright Computed Contrast**: Uses a Playwright Chromium headless instance to render the page and extract exact Computed Styles for foreground/background colors, ensuring deterministic and flawless WCAG 1.4.3 contrast ratio calculations without relying on AI mathematical estimations.
 - **Robust JSON Parsing Engine**: Features a fault-tolerant JSON extraction system capable of parsing clean payloads out of arbitrary markdown code blocks and conversational commentary returned by the model.
 - **Deterministic Skills**: 6 highly specialized, deterministic accessibility skills that execute locally via Playwright (e.g., focus trap detection, HTML lang validation).
 - **Security Guardrails**: Strict input validation to ensure only authorized local environments or raw HTML snippets are scanned.
@@ -71,9 +73,9 @@ flowchart TD
         AGENT -->|Calls| DOM[DOM Parsers]
         AGENT -->|Calls| VISION[Gemini Vision Model]
         
-        PLAY -.->|Focus Traps & Tab Order| AGENT
+        PLAY -.->|Focus Traps, Tab Order & Contrast| AGENT
         DOM -.->|Labels & Lang Attributes| AGENT
-        VISION -.->|Contextual Alt Text & Contrast| AGENT
+        VISION -.->|Contextual Alt Text| AGENT
     end
     
     AGENT -->|Synthesizes Findings & Refactors HTML| JSON_REPORT[JSON Fixes Payload]
@@ -90,7 +92,7 @@ flowchart TD
 | **Keyboard Auditing**| `focus-order-validator` | Playwright Simulation | Detects illogical focus orders and jumps | 2.4.3 (Focus Order) |
 | | `focus-trap-detector` | Playwright Simulation | Detects keyboard focus traps in components | 2.1.2 (No Focus Trap) |
 | **Document Auditing** | `document-language-validator`| Deterministic (DOM Parsing) | Validates root `<html>` lang attribute | 3.1.1 (Language of Page) |
-| | `text-contrast-calculator` | First-Class Deterministic Tool | Calculates text contrast mathematically against backgrounds | 1.4.3 (Contrast) |
+| | `text-contrast-calculator` | Playwright Simulation (Computed Styles) | Calculates text contrast mathematically against rendered backgrounds | 1.4.3 (Contrast) |
 | | `interactive-elements-validator`| Deterministic (DOM Parsing) | Identifies empty links or button tags | 2.4.4 / 4.1.2 (Name/Role) |
 | **Refactoring** | `suggestion-fix-generator` | Gemini Text Refactoring | Generates clean HTML replacement code | N/A |
 
@@ -165,6 +167,13 @@ Bondy can be fully deployed to your own Google Cloud environment (Cloud Run) usi
      agents-cli deploy
      ```
 
+### 5. Auditing Local Files (Usage)
+Bondy supports auditing local files seamlessly. To scan a local project:
+1. Drop your HTML files or folders into the local `demo_sites/` directory within this repository.
+2. Open the Bondy Web UI (`http://localhost:8080`).
+3. In the URL bar of the UI, simply type the path to your file relative to the demo folder (e.g., `demo_sites/my_folder/index.html` or just `demo_sites/my_folder`).
+4. Bondy will read your local HTML, launch a headless browser to evaluate computed styles and interactions, and autonomously generate a JSON fix.
+
 ## Testing & Linting
 
 ### Running Tests
@@ -214,6 +223,8 @@ All tools strictly adhere to the project's security rules (`AGENTS.md`), prevent
 ## References
 
 WebAIM. (2026). *The WebAIM million: An annual accessibility analysis of the top 1,000,000 home pages*. Center for Persons with Disabilities, Utah State University. https://webaim.org/projects/million/
+
+Demo site templates provided by [freewebsitetemplates.com](https://freewebsitetemplates.com) (used for accessibility auditing test environments).
 
 ---
 *Built using the Google Agent Development Kit.*

@@ -1,17 +1,20 @@
 <!DOCTYPE html>
-<html lang="en">
-
+<html lang="es">
 <head>
     <meta charset="UTF-8">
     <title>Demo 1: Bad Alt Text</title>
 </head>
-
 <body>
-    <h1>Quarterly Report (Alt Text Demo)</h1>
+    <h1>Reporte Trimestral (Demo Alt Text)</h1>
+    
+    <!-- Bug 1: Imagen con alt incorrecto -->
+    <img src="https://images.unsplash.com/photo-1543466835-00a7907e9de1?w=400" alt="Gráfica de ventas Q3" width="400">
 
-    <!-- Bug 1: Image with incorrect alt text -->
-    <img src="https://images.unsplash.com/photo-1543466835-00a7907e9de1?w=400" alt="Graphic of Q3 sales" width="400">
+    <br><br>
 
+    <h2>Resultados adicionales</h2>
+    <!-- Bug 3: Imagen sin alt en absoluto -->
+    <img src="https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=400" width="400">
+    
 </body>
-
 </html>

@@ -56,8 +56,24 @@ def check_accessible_name(html_str: str) -> list:
             if classes:
                 selector += f".{classes[0]}"
 
+        # Extract inner classes to help identify icon fonts
+        icon_classes = []
+        class_matches = re.findall(
+            r'class\s*=\s*["\']([^"\']+)["\']', inner_html, re.IGNORECASE
+        )
+        for c_match in class_matches:
+            icon_classes.extend(c_match.split())
+
         results.append(
-            {"selector": selector, "type": tag_name, "has_accessible_name": has_name}
+            {
+                "selector": selector,
+                "type": tag_name,
+                "has_accessible_name": has_name,
+                "icon_hint": " ".join(icon_classes)
+                if not has_name and icon_classes
+                else None,
+                "inner_html": inner_html.strip(),
+            }
         )
 
     return results

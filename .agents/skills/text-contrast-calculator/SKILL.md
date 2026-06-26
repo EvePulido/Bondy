@@ -6,11 +6,11 @@ description: |
 
 ## Instructions
 
-1. Receives the `dom_snapshot` serialized from Playwright.
-2. For each visible text node, extracts the text color (`fg`) and the effective background color (`bg`), resolving transparencies if present.
-3. Executes `scripts/contrast.py fg_hex bg_hex` to obtain the contrast ratio.
-4. Determines the required threshold depending on the font size/weight.
-5. Returns a list of `issues` according to the technical contract: `{ "issues": list }` where each issue contains: `{ "selector": string, "contrast_ratio": float, "passes_wcag": bool }`.
+1. Receives the full HTML document (`content`) via stdin.
+2. Executes `scripts/contrast.py` which launches Playwright and injects a script into the page.
+3. For each visible text node, it automatically extracts the computed text color (`fg`) and the effective background color (`bg`), resolving transparencies if present.
+4. Determines the required threshold depending on the computed font size and weight.
+5. Returns a JSON string containing `{"issues": list}` where each issue contains: `{ "selector": string, "text_snippet": string, "contrast_ratio": float, "passes_wcag": bool, "required": float }`.
 
 ## When NOT to activate this skill
 

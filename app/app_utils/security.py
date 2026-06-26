@@ -17,21 +17,23 @@ def validate_input_before_audit(source: str, raw_html: str | None = None) -> Non
     if raw_html is not None:
         return  # Raw HTML pasted directly: allowed
 
-    # Resolución segura del path real
+    # Safely resolve the absolute real path
     base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 
-    # Prevenir que el os.path.join evalúe rutas absolutas maliciosas si el source empieza con / o C:\
+    # Prevent malicious absolute paths from bypassing os.path.join if source starts with / or C:\
     clean_source = source.lstrip("/\\")
     if ":" in clean_source:
         clean_source = clean_source.split(":", 1)[1].lstrip("/\\")
 
     resolved_path = os.path.abspath(os.path.join(base_dir, clean_source))
 
-    # El path final DEBE estar contenido dentro del base_dir para evitar Directory Traversal
+    # The final path MUST be contained within the base_dir to prevent Directory Traversal
     if not resolved_path.startswith(base_dir):
-        raise ValueError("Access denied (Security Module). Path traversal detected.")
+        raise ValueError(
+            "Path traversal detected. Recovery: Please provide a safe, direct path inside the 'demo_sites' directory without using '../' or absolute paths."
+        )
 
-    # Permitir cualquier archivo o directorio contenido dentro de la carpeta 'demo_sites'
+    # Allow any file or directory strictly inside the 'demo_sites' folder
     demo_sites_abs = os.path.abspath(os.path.join(base_dir, "demo_sites"))
     is_allowed = resolved_path == demo_sites_abs or resolved_path.startswith(
         demo_sites_abs + os.sep
@@ -39,8 +41,7 @@ def validate_input_before_audit(source: str, raw_html: str | None = None) -> Non
 
     if not is_allowed:
         raise ValueError(
-            f"Access denied (Security Module). Source not allowed: {source}. "
-            f"Please use a path inside the 'demo_sites' folder or input raw HTML content directly."
+            f"The path '{source}' is not allowed for security reasons. Recovery: Please make sure the path is strictly inside the 'demo_sites' folder, or switch to the 'HTML' tab to paste your code directly."
         )
 
 
@@ -51,13 +52,14 @@ def get_safe_demo_path(source: str) -> str:
     validate_input_before_audit(source)
     base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 
-    # Previene la duplicación si el agente ya incluyó index.html en la ruta
-    clean_src = source.replace("\\", "/")
-    if clean_src.endswith("index.html"):
-        safe_path = os.path.join(base_dir, source)
-    else:
-        safe_path = os.path.join(base_dir, source, "index.html")
+    safe_path = os.path.join(base_dir, source)
+
+    # If the path is a directory, attempt to resolve its index.html
+    if os.path.isdir(safe_path):
+        safe_path = os.path.join(safe_path, "index.html")
 
     if not os.path.exists(safe_path):
-        raise FileNotFoundError(f"The demo site file does not exist at: {safe_path}")
+        raise FileNotFoundError(
+            f"File not found: '{safe_path}'. Recovery: Please verify that you typed the path correctly and that the file actually exists in the local project."
+        )
     return safe_path
