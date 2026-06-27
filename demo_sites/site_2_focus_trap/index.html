@@ -1,29 +1,51 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <title>Demo 2: Focus Trap & Order</title>
     <style>
-        body { font-family: sans-serif; padding: 20px; }
+        body {
+            font-family: sans-serif;
+            padding: 20px;
+        }
+
         .modal {
-            display: none;
+            display: block;
             position: fixed;
-            top: 50%; left: 50%;
+            top: 50%;
+            left: 50%;
             transform: translate(-50%, -50%);
-            background: white; border: 2px solid black; padding: 20px;
+            background: white;
+            border: 2px solid black;
+            padding: 20px;
             z-index: 1000;
         }
+
         .backdrop {
-            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-            background: rgba(0,0,0,0.5); z-index: 999;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 999;
         }
     </style>
 </head>
+
 <body>
     <!-- Bug 2: Illogical focus order.
-         The modal was originally at the beginning of the DOM with tabindex=0, 
-         so it received focus before the user could see the main content. -->
-    
+         The modal is at the start of the DOM with tabindex=0, 
+         so it receives focus before the user sees the main content. -->
+
+    <div class="backdrop"></div>
+    <div class="modal" role="dialog" tabindex="0">
+        <h2>Subscription Modal</h2>
+        <input type="text" id="email" placeholder="Email address">
+        <button id="subscribe">Subscribe</button>
+        <!-- Bug 1: Modal without Escape key handling or a keyboard-reachable close button -->
+    </div>
 
     <main>
         <h1>Main Content</h1>
@@ -31,81 +53,31 @@
         <button id="btn-1">Main Button</button>
         <a href="#">Main Link</a>
     </main>
- 
-    <div class="backdrop"></div>
-    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
-        <button id="close-modal" aria-label="Close modal" style="float: right; margin-top: -10px;">×</button>
-        <h2 id="modal-title">Subscription Modal</h2>
-        <label for="email">Email address</label>
-        <input type="text" id="email">
-        <button id="subscribe">Subscribe</button>
-    </div>
 
     <script>
+        // Explicitly simulate the focus trap by intercepting the Tab key
         const modal = document.querySelector('.modal');
-        const backdrop = document.querySelector('.backdrop');
-        const openModalButton = document.getElementById('btn-1');
-        const closeModalButton = document.getElementById('close-modal');
-        const mainContent = document.querySelector('main');
-        let triggerElement = null;
+        const focusableElements = modal.querySelectorAll('input, button, [tabindex="0"]');
+        const firstElement = focusableElements[0];
+        const lastElement = focusableElements[focusableElements.length - 1];
 
-        const focusableSelector = 'a[href], area[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), button:not([disabled]), iframe, object, embed, [tabindex]:not([tabindex="-1"]), [contenteditable]';
-
-        function closeModal() {
-            modal.style.display = 'none';
-            backdrop.style.display = 'none';
-            if (mainContent) mainContent.removeAttribute('aria-hidden');
-            if (triggerElement) {
-                triggerElement.focus();
-                triggerElement = null;
-            }
-        }
-
-        function openModal() {
-            triggerElement = document.activeElement;
-            modal.style.display = 'block';
-            backdrop.style.display = 'block';
-            if (mainContent) mainContent.setAttribute('aria-hidden', 'true');
-            
-            // Focus the first element in the modal, which is the close button in the refactored HTML
-            const focusableElements = modal.querySelectorAll(focusableSelector);
-            if (focusableElements.length > 0) {
-                focusableElements[0].focus();
-            }
-        }
-
-        // Event listeners for opening and closing
-        openModalButton.addEventListener('click', openModal);
-        closeModalButton.addEventListener('click', closeModal);
-        backdrop.addEventListener('click', closeModal);
-
-        // Focus Trap and Escape Key Handling
-        document.addEventListener('keydown', function(e) {
-            if (e.key === 'Escape' && modal.style.display !== 'none') {
-                closeModal();
-                return;
-            }
-
-            if (e.key === 'Tab' && modal.style.display !== 'none') {
-                const focusables = modal.querySelectorAll(focusableSelector);
-                if (focusables.length === 0) return;
-
-                const first = focusables[0];
-                const last = focusables[focusables.length - 1];
-
+        modal.addEventListener('keydown', function (e) {
+            if (e.key === 'Tab') {
                 if (e.shiftKey) { // Shift + Tab
-                    if (document.activeElement === first) {
+                    if (document.activeElement === firstElement) {
                         e.preventDefault();
-                        last.focus();
+                        lastElement.focus();
                     }
                 } else { // Tab
-                    if (document.activeElement === last) {
+                    if (document.activeElement === lastElement) {
                         e.preventDefault();
-                        first.focus();
+                        firstElement.focus();
                     }
                 }
             }
+            // There is intentionally NO handling for the "Escape" key
         });
     </script>
 </body>
+
 </html>

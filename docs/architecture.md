@@ -12,7 +12,7 @@ Bondy targets the **6 main error categories representing 96% of actual accessibi
 
 | WebAIM Million Category | % of Pages | Responsible Agent Skill | Skill Type | WCAG Criterion |
 | :--- | :--- | :--- | :--- | :--- |
-| Low Contrast Text | 83.9% | `text-contrast-calculator` | Deterministic (DOM/Math Formula) | 1.4.3 |
+| Low Contrast Text | 83.9% | `text-contrast-calculator` | Playwright Simulation (Computed Styles) | 1.4.3 |
 | Missing Alt Text | 53.1% | `alt-text-quality-analyzer` | Gemini Multimodal Vision | 1.1.1 |
 | Missing Labels | 51.0% | `form-labels-validator` | Deterministic (DOM Parsing) | 1.3.1 / 4.1.2 |
 | Empty Links | 46.3% | `interactive-elements-validator` | Deterministic (DOM Parsing) | 2.4.4 / 4.1.2 |
@@ -44,9 +44,9 @@ flowchart TD
         AGENT -->|Calls| DOM[DOM Parsers]
         AGENT -->|Calls| VISION[Gemini Vision Model]
         
-        PLAY -.->|Focus Traps & Tab Order| AGENT
+        PLAY -.->|Focus Traps, Tab Order & Contrast| AGENT
         DOM -.->|Labels & Lang Attributes| AGENT
-        VISION -.->|Contextual Alt Text & Contrast| AGENT
+        VISION -.->|Contextual Alt Text| AGENT
     end
     
     AGENT -->|Synthesizes Findings & Refactors HTML| JSON_REPORT[JSON Fixes Payload]
@@ -89,7 +89,7 @@ To meet secure coding standards, the project implements three layers of control:
 
 1. **Deterministic Path and Input Guardrail (`app/app_utils/security.py`):**
    Before launching Playwright browser instances, the input source is evaluated. The agent is restricted from navigating to arbitrary external URLs. It only allows:
-   * Pre-registered local demo sites under `demo_sites/`.
+   * Explicit files or directories within the local `demo_sites/` sandbox.
    * Statically sanitized raw HTML inputs directly pasted by the user.
 2. **Fine-Grained MCP Privileges (`mcp_server/github_server.py`):**
    The GitHub reader Model Context Protocol server uses read-only calls (`read_github_file` and `list_github_directory`) authorized under a minimal fine-grained personal access token.

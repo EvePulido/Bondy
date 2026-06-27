@@ -216,3 +216,6 @@ day5.md
 .ruff_cache/
 
 KAGGLE_WRITEUP.md
+
+# Artifacts
+artifacts/

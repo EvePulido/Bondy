@@ -213,7 +213,7 @@ async def run_audit(req: AuditRequest):
                             pass
 
                     raise ValueError(
-                        "No valid JSON could be parsed from the agent output."
+                        "The AI failed to format its response as a valid JSON array. Recovery: Please click 'Run accessibility audit' again to let the AI try generating the correct format."
                     )
 
                 try:
@@ -234,7 +234,7 @@ async def run_audit(req: AuditRequest):
             return JSONResponse(
                 {
                     "status": "error",
-                    "message": "The workflow did not produce any output.",
+                    "message": "The AI workflow timed out or did not produce any output. Recovery: Please click 'Run' to try again, or reduce the number of checks if the page is too large.",
                 },
                 status_code=500,
             )
@@ -271,28 +271,35 @@ async def run_audit(req: AuditRequest):
             )
 
 
+from collections import defaultdict
+
+file_locks = defaultdict(asyncio.Lock)
+
+
 @app.post("/api/apply-fix")
 async def apply_fix(req: ApplyFixRequest):
     from app.app_utils.security import get_safe_demo_path
 
     try:
         safe_path = get_safe_demo_path(req.file_path)
-        with open(safe_path, encoding="utf-8") as f:
-            content = f.read()
 
-        if req.before not in content:
-            return JSONResponse(
-                {
-                    "status": "error",
-                    "message": "Original code not found in file. Ensure the file hasn't been modified externally.",
-                },
-                status_code=400,
-            )
+        async with file_locks[safe_path]:
+            with open(safe_path, encoding="utf-8") as f:
+                content = f.read()
 
-        content = content.replace(req.before, req.after, 1)
+            if req.before not in content:
+                return JSONResponse(
+                    {
+                        "status": "error",
+                        "message": "Original code not found in file. Ensure the file hasn't been modified externally.",
+                    },
+                    status_code=400,
+                )
 
-        with open(safe_path, "w", encoding="utf-8") as f:
-            f.write(content)
+            content = content.replace(req.before, req.after, 1)
+
+            with open(safe_path, "w", encoding="utf-8") as f:
+                f.write(content)
 
         return {"status": "success", "message": "Fix applied successfully"}
     except Exception as e:
