@@ -45,6 +45,9 @@ lint = [
 line-length = 88
 target-version = "py311"
 
+[tool.ruff.format]
+line-ending = "native"
+
 [tool.ruff.lint]
 select = [
     "E",   # pycodestyle
@@ -83,8 +86,8 @@ not-subscriptable = "ignore"
 deprecated = "ignore"
 
 [tool.codespell]
-ignore-words-list = "rouge"
-skip = "./locust_env/*,uv.lock,.venv,./frontend,**/package-lock.json"
+ignore-words-list = "rouge,fixel"
+skip = "./locust_env/*,uv.lock,.venv,./frontend,**/package-lock.json,*Bondy*,GEMINI.md,*OPTIMIZATION_GUIDE.md"
 
 
 

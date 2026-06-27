@@ -1,4 +1,4 @@
-# Local Project Context & Secure Coding Standards — Bondy (A11y-Forge)
+# Local Project Context & Secure Coding Standards — Bondy
 
 This file defines the project context and persistent security standards that all development agents in this workspace must strictly follow.
 
@@ -14,8 +14,8 @@ This file defines the project context and persistent security standards that all
   2. Apply the necessary style, syntax, or logic fixes to the affected files.
   3. Run `uv run pre-commit run --all-files` manually to verify that 100% of the checks pass cleanly before attempting to commit again.
 
-## 3. System Architecture (ADK 2.0 Workflows)
-* **Rule:** The main agent orchestration logic of the project must be implemented using the native Graphs/Workflows API of **google-adk 2.0** in `app/agent.py`. Avoid manual sequential Python orchestrations without a defined graph to comply with the framework standards.
+## 3. System Architecture (ADK 2.0)
+* **Rule:** The main agent orchestration logic of the project must be implemented using a single `LlmAgent` (the `BondyAccessibilityAgent`) equipped with a `SkillToolset` in `app/agent.py`. Avoid parallel graph workflows to prevent Google Cloud Vertex AI rate limit (429) exhaustion.
 
 ## 4. Code Preservation
 * **Rule:** Only modify modules or files that are directly related to the user's request. Preserve all surrounding code, comments, AI model configurations, and standard project formatting intact.

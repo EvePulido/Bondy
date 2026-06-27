@@ -1,22 +1,22 @@
 <!DOCTYPE html>
-<html> <!-- Bug 4: Falta el atributo lang en <html> -->
+<html> <!-- Bug 4: Missing lang attribute on <html> -->
 <head>
     <meta charset="UTF-8">
     <title>Demo 3: Mixed Errors</title>
     <style>
         body { font-family: sans-serif; padding: 20px; }
         .bad-contrast {
-            color: #AAAAAA; /* Bug 1: Contraste insuficiente (#AAAAAA sobre blanco es aprox 2.32:1) */
+            color: #AAAAAA; /* Bug 1: Insufficient contrast (#AAAAAA on white is approx 2.32:1) */
             background-color: #FFFFFF;
         }
     </style>
 </head>
 <body>
-    <h1 class="bad-contrast">Título Principal con Mal Contraste</h1>
+    <h1 class="bad-contrast">Main Title with Bad Contrast</h1>
     
-    <p>A continuación se muestran errores mezclados:</p>
+    <p>Below are mixed accessibility errors:</p>
 
-    <!-- Bug 2: Botón con solo ícono SVG, sin aria-label -->
+    <!-- Bug 2: Button with SVG icon only, missing aria-label -->
     <button>
         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <line x1="18" y1="6" x2="6" y2="18"></line>
@@ -26,8 +26,8 @@
 
     <br><br>
 
-    <!-- Bug 3: Checkbox sin label explícito o implícito -->
-    <input type="checkbox" id="newsletter_optin"> Suscribirse al newsletter mensual
+    <!-- Bug 3: Checkbox without explicit or implicit label -->
+    <input type="checkbox" id="newsletter_optin"> Subscribe to monthly newsletter
     
 </body>
 </html>

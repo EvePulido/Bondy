@@ -1,17 +1,17 @@
-# Criterio de Conformidad WCAG 1.1.1: Contenido No Textual
+# WCAG 1.1.1 Success Criterion: Non-text Content
 
-Todo contenido no textual que se presenta al usuario tiene una alternativa textual que cumple el mismo propósito, excepto en las situaciones enumeradas a continuación.
+All non-text content that is presented to the user has a text alternative that serves the equivalent purpose, except for the situations listed below.
 
-## Directrices para el Texto Alternativo (alt)
+## Guidelines for Alternative Text (alt)
 
-- **Imágenes Informativas**: Imágenes que representan conceptos e información, como fotos, gráficos y diagramas. El texto alternativo debe ser al menos una breve descripción que transmita la misma información que la imagen.
-- **Imágenes Decorativas**: Se proporcionan solo con fines estéticos, no aportan información y no tienen funcionalidad. Deben tener un atributo alt vacío (`alt=""`) para que las tecnologías de asistencia las ignoren.
-- **Imágenes Funcionales**: Imágenes utilizadas como enlaces o botones (ej. un ícono de lupa para buscar). El texto alternativo debe describir la función o destino del enlace/botón, NO describir la imagen (ej. "Buscar" y no "Lupa").
+- **Informative Images**: Images that represent concepts and information, typically pictures, graphs, and diagrams. The text alternative should be at least a short description conveying the essential information presented by the image.
+- **Decorative Images**: Provided only for aesthetic purposes, providing no information, and having no functionality. They must have an empty alt attribute (`alt=""`) so they can be ignored by assistive technologies.
+- **Functional Images**: Images used as links or buttons (e.g., a magnifying glass icon for search). The text alternative should describe the function or destination of the link/button, NOT describe the image visually (e.g., "Search" and not "Magnifying glass").
 
-## Evaluando la Calidad
+## Evaluating Quality
 
-Un alt text es **deficiente** si:
-- Es demasiado largo o detalla información irrelevante (spam de palabras clave).
-- Describe el archivo ("imagen de", "foto de", "logo.png").
-- No refleja adecuadamente la intención o función de la imagen en su contexto.
-- En una gráfica/diagrama, no transmite los datos clave o el mensaje principal.
+Alt text is **poor** if it:
+- Is overly verbose or details irrelevant information (keyword stuffing).
+- Describes the file format or uses redundant phrases ("image of", "photo of", "logo.png").
+- Does not adequately reflect the intent or function of the image within its context.
+- For a chart/diagram, fails to convey the key data or main message.
