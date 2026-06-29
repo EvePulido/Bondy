@@ -64,21 +64,21 @@ To circumvent rate limits while maintaining high performance, Bondy uses a singl
 
 ```mermaid
 flowchart TD
-    UI[FastAPI Web Interface] -->|URL or HTML Snippet| SEC{Security Validator}
-    SEC -->|Allowed| AGENT[BondyAccessibilityAgent]
-    SEC -->|Blocked| ERR[HTTP 403 Forbidden]
+    UI["FastAPI Web Interface"] -->|"URL or HTML Snippet"| SEC{"Security Validator"}
+    SEC -->|"Allowed"| AGENT["BondyAccessibilityAgent"]
+    SEC -->|"Blocked"| ERR["HTTP 403 Forbidden"]
     
-    subgraph Agent Runtime
-        AGENT -->|Calls| PLAY[Playwright Simulator]
-        AGENT -->|Calls| DOM[DOM Parsers]
-        AGENT -->|Calls| VISION[Gemini Vision Model]
+    subgraph Agent_Runtime ["Agent Runtime"]
+        AGENT -->|"Calls"| PLAY["Playwright Simulator"]
+        AGENT -->|"Calls"| DOM["DOM Parsers"]
+        AGENT -->|"Calls"| VISION["Gemini Vision Model"]
         
-        PLAY -.->|Focus Traps, Tab Order & Contrast| AGENT
-        DOM -.->|Labels & Lang Attributes| AGENT
-        VISION -.->|Contextual Alt Text| AGENT
+        PLAY -.->|"Focus Traps, Tab Order and Contrast"| AGENT
+        DOM -.->|"Labels and Lang Attributes"| AGENT
+        VISION -.->|"Contextual Alt Text"| AGENT
     end
     
-    AGENT -->|Synthesizes Findings & Refactors HTML| JSON_REPORT[JSON Fixes Payload]
+    AGENT -->|"Synthesizes Findings and Refactors HTML"| JSON_REPORT["JSON Fixes Payload"]
     JSON_REPORT --> UI
 ```
 
