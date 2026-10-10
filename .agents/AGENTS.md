@@ -5,7 +5,7 @@ This file defines the project context and persistent security standards that all
 ---
 
 ## 1. Mandatory Input Validation (Security First)
-* **Rule:** Before invoking any web navigation or automation tool via Playwright (e.g., in focus validators or focus trap detectors), you must validate the input parameters against the deterministic security module in `app/app_utils/security.py` using the `validate_input_before_audit` function.
+* **Rule:** Before invoking any web navigation or automation tool via Playwright (e.g., in focus validators or focus trap detectors), you must validate the input parameters against the deterministic security module in `bondy/app_utils/security.py` using the `validate_input_before_audit` function.
 * **Allowed Sources:** Only allow local demo directories statically registered in `ALLOWED_SOURCES` (`demo_sites/...`) or raw HTML content pasted directly. Arbitrary external HTTP requests to untrusted internet URLs are strictly prohibited.
 
 ## 2. Code Quality and Pre-Commit Remediation Loop
@@ -15,7 +15,7 @@ This file defines the project context and persistent security standards that all
   3. Run `uv run pre-commit run --all-files` manually to verify that 100% of the checks pass cleanly before attempting to commit again.
 
 ## 3. System Architecture (ADK 2.0)
-* **Rule:** The main agent orchestration logic of the project must be implemented using a single `LlmAgent` (the `BondyAccessibilityAgent`) equipped with a `SkillToolset` in `app/agent.py`. Avoid parallel graph workflows to prevent Google Cloud Vertex AI rate limit (429) exhaustion.
+* **Rule:** The ADK agent logic lives in `bondy/agent.py` as a single `LlmAgent` (the `BondyAccessibilityAgent`) equipped with a `SkillToolset`. It is an **optional mode** installed with the `agent` extra, not a hard dependency of the core package. The deterministic scanners must remain usable without ADK. Per decision D1 of `docs/improvement-plan.md`, the default pipeline will be code-driven (Phase B, not yet implemented); until then the agent is still what the web UI runs. Avoid parallel graph workflows to prevent rate limit (429) exhaustion.
 
 ## 4. Code Preservation
 * **Rule:** Only modify modules or files that are directly related to the user's request. Preserve all surrounding code, comments, AI model configurations, and standard project formatting intact.

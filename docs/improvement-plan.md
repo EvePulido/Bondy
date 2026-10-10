@@ -19,7 +19,7 @@ Fuentes de datos externos verificadas (documentación oficial de Gemini API): l�
 
 ## 1. Estado actual (revisado)
 
-Hecho en esta rama (33 tests unitarios pasan, `ruff check` limpio):
+Hecho antes de la Fase A (33 tests unitarios pasaban, `ruff check` limpio):
 
 | Cambio | Archivo | Estado |
 |---|---|---|
@@ -31,15 +31,17 @@ Hecho en esta rama (33 tests unitarios pasan, `ruff check` limpio):
 
 Hallazgos de la medición (site 1, solo alt text): ~12 peticiones por escaneo; cuota gratuita observada de 5/min y 20/día por modelo; un reintento reiniciaba toda la auditoría. Pendiente de re-medir cuando se restablezca la cuota.
 
-Deuda de portabilidad detectada (nueva):
+**Fase A ejecutada en la rama `refactor/package-bondy`** (sin commitear; 59 tests unitarios pasan, `ruff check` limpio): ver el estado por tarea en la sección 4.
 
-- El paquete se llama `app` (nombre genérico; se instalaría como `import app` en site-packages).
-- `.agents/skills/`, `web/` y `demo_sites/` están fuera del paquete: **no viajarían en un wheel**.
-- Rutas relativas al cwd (`.agents/skills`, `web/index.html`, `os.makedirs("web")`).
-- Dependencias de nube innecesarias en local: `google-adk[gcp]`, `gcsfs`, `google-cloud-logging`, OpenTelemetry.
-- `load_dotenv(override=True)` pisa variables de entorno del usuario.
-- Solo acepta rutas dentro de `demo_sites/`.
-- Salida solo vía UI web; sin CLI ni códigos de salida.
+Deuda de portabilidad detectada (nueva), con su estado tras la Fase A:
+
+- ~~El paquete se llama `app`~~ -> renombrado a `bondy` (A1).
+- ~~`.agents/skills/` y `web/` fuera del paquete~~ -> ahora en `bondy/resources/` y presentes en el wheel (A1). **Pendiente**: `demo_sites/` sigue fuera del paquete y `security.py`/`render_page.py`/`vision_tools.py` aún resuelven `demo_sites/` desde la raíz del repo (Fase D1).
+- ~~Rutas relativas al cwd~~ -> resueltas con `importlib.resources` (`bondy/resources/__init__.py`) (A1).
+- ~~Dependencias de nube en el núcleo~~ -> movidas al extra `gcp`; Cloud Logging es opt-in con `BONDY_CLOUD_LOGGING=1` (A2).
+- ~~`load_dotenv(override=True)`~~ -> `override=False` (A4).
+- Solo acepta rutas dentro de `demo_sites/` en la web/API (la CLI `scan` acepta cualquier ruta local pasando el contenido como HTML crudo). Pendiente: Fase D1.
+- ~~Sin CLI ni códigos de salida~~ -> `bondy scan --no-llm` y `bondy doctor` (A3/A5, MVP).
 
 ---
 
@@ -91,14 +93,16 @@ Efecto esperado sobre peticiones: de ~12 por página de 2 imágenes a **1-2** (u
 
 ### Fase A — Cimientos portables (P0)
 
-| # | Tarea | Esfuerzo | Criterio de aceptación |
+Estado en la rama `refactor/package-bondy` (sin commitear).
+
+| # | Tarea | Estado | Notas / desviaciones |
 |---|---|---|---|
-| A1 | Renombrar `app/` → `bondy/`; mover skills/web/fix_patterns a `bondy/resources/` como package data; localizar recursos con `importlib.resources`. | M | `pip install .` en un venv limpio y `bondy --version` funciona desde cualquier directorio. |
-| A2 | Dependencias por extras: núcleo (`playwright`, `google-genai`, `pydantic`, `beautifulsoup4`/`lxml`), `bondy[server]` (FastAPI/uvicorn), `bondy[agent]` (ADK). Quitar `gcsfs`, `google-cloud-logging`, OpenTelemetry del núcleo. Telemetría **apagada** y documentada. | M | Instalación base sin ADK ni GCP; `bondy scan --no-llm` corre. |
-| A3 | CLI: `bondy scan <ruta\|url>`, `bondy fix`, `bondy serve`, `bondy estimate`, `bondy doctor`. Soportar `uvx bondy`/`pipx run`. | L | Comandos documentados con `--help`. |
-| A4 | Configuración: `bondy.toml` (include/exclude, checks, modelo, presupuesto, formato) + flags + variables de entorno (`GEMINI_API_KEY`/`GOOGLE_API_KEY`). Precedencia: flag > env > archivo. **No** usar `override=True` sobre el entorno del usuario. | M | Tests de precedencia. |
-| A5 | `bondy doctor`: verifica Python, Chromium/Chrome instalado, key presente y válida (1 petición mínima), versión de axe, permisos de escritura. Mensajes con la acción exacta. | M | Cada fallo da un comando para corregirlo. |
-| A6 | Navegador: usar Chromium de Playwright o **Chrome/Edge del sistema** (`channel=`) si no hay descarga; si no hay navegador, modo estático (HTML parseado) con aviso de qué checks se pierden. | M | Funciona en una máquina sin `playwright install`. |
+| A1 | Renombrar `app/` → `bondy/`; recursos a `bondy/resources/` con `importlib.resources`. | **Hecho** | `git mv`; el wheel contiene `resources/` (verificado). Subpaquete `app_utils` se mantiene (renombrado mecánico). Nombre de la `App` ADK y `app_name` pasan de `"app"` a `"bondy"` (rutas `/apps/bondy/...`). `git-commit-formatter` salió del proyecto y quedó como skill global en `~/.claude/skills/` (no forma parte del runtime). `demo_sites/` **no** se renombró a `examples/` (lo referencian `ALLOWED_SOURCES`, tests y `security.py`; se hará con D1). `.gitignore` tenía `Bondy/`, que git (insensible a mayúsculas en Windows/macOS) aplicaba también al paquete `bondy/`: se corrigió para que los archivos nuevos no queden ignorados. `bondy --version` funciona (ver A3); `pip install .` en venv limpio: imports y recursos OK, el escaneo requirió descargar Chromium (no verificado). |
+| A2 | Dependencias por extras. | **Hecho** | Núcleo: `playwright`, `google-genai`, `pydantic` (no hizo falta `beautifulsoup4`/`lxml`). Extras `server`, `agent`, `gcp`, `mcp` (+ `eval`, `lint` existentes). El grupo `dev` incluye `bondy[server,agent]`. Telemetría apagada por defecto (documentado en README). `bondy/__init__.py` ya no importa ADK (`__getattr__` perezoso). Regla 3 de AGENTS.md actualizada. Pendiente: el servidor web aún requiere `agent` (usa ADK); desacoplarlo es parte de B2. |
+| A3 | CLI: `scan`, `fix`, `serve`, `estimate`, `doctor`. | **Parcial (MVP)** | Hecho: `bondy scan <archivo\|carpeta> [--no-llm] [--format terminal\|json] [--fail-on] [--checks] [--include/--exclude] [--config]` con códigos de salida 0/1/2, y `python -m bondy`. Pendiente: `fix`, `serve`, `estimate`, URLs, y que `scan` sin `--no-llm` use el LLM (hoy avisa y corre solo lo determinista). Sin browser compartido ni paralelismo (cada escáner abre su Chromium; Fase B). |
+| A4 | Configuración `bondy.toml` + env + flags. | **Hecho** | `bondy/config.py`; precedencia flag > env > archivo > default, con tests. La API key **no** se acepta en `bondy.toml`. `GEMINI_API_KEY` precede a `GOOGLE_API_KEY`. Pendiente: que `vision_tools.py`/`agent.py`/`fast_api_app.py` lean de `Settings` (hoy siguen leyendo `BONDY_VISION_MODEL`/`BONDY_FALLBACK_MODEL` directamente, con los mismos defaults) y pasar la key explícita al `Client` (el SDK da prioridad a `GOOGLE_API_KEY`). Presupuesto (`budget`) llega con B6. |
+| A5 | `bondy doctor`. | **Parcial** | Hecho (offline): Python, paquete/binario de Chromium, axe-core, `bondy.toml`, key presente (nunca se imprime), permiso de escritura; cada fallo da el comando. Pendiente: validar la key con 1 petición real (consume cuota; no se implementó a propósito). |
+| A6 | Navegador del sistema / modo estático. | **Pendiente** | Solo la detección de Chrome/Edge del sistema en `doctor` (informa, no lo usa). Falta pasar `channel=` a los 5 scripts de Playwright (con fallback) y el modo estático. |
 
 ### Fase B — Costo y eficiencia (P0)
 

@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="web/assets/logo-bondy.png" alt="Bondy Logo" width="250"/>
+  <img src="bondy/resources/web/assets/logo-bondy.png" alt="Bondy Logo" width="250"/>
   <h1>Bondy</h1>
   <p><strong>An autonomous, agentic Web Accessibility Auditor built on Google ADK 2.0.</strong></p>
 </div>
@@ -109,11 +109,24 @@ flowchart TD
 - A Gemini API key from [Google AI Studio](https://aistudio.google.com/apikey) (free, no billing needed) **or** a Google Cloud Project with Vertex AI enabled.
 
 ### 2. Installation & Credentials Setup
-1. Clone the repository and sync dependencies:
+1. Clone the repository and sync dependencies. The base install is minimal (Playwright + `google-genai` + Pydantic); the web UI and the ADK agent are opt-in extras:
    * **Windows / macOS / Linux**:
      ```bash
-     uv sync
+     uv sync                                  # dev checkout: core + dev group (includes server + agent)
+     uv sync --no-dev --extra server --extra agent   # run the web UI + agent only
+     uv pip install "bondy[server,agent]"     # from a built wheel / index
      ```
+
+   | Extra | Adds | Needed for |
+   | :--- | :--- | :--- |
+   | _(none)_ | `playwright`, `google-genai`, `pydantic` | Deterministic scanners and vision tools |
+   | `server` | `fastapi`, `uvicorn`, `python-dotenv` | Local web UI / HTTP API (`bondy.fast_api_app`) |
+   | `agent` | `google-adk` | ADK `BondyAccessibilityAgent` (the web UI uses it today, so install `server` + `agent` together) |
+   | `gcp` | `google-adk[gcp]`, Cloud Logging, GCS, OpenTelemetry GenAI | Cloud Run / Vertex AI deployments only |
+   | `mcp` | `mcp`, `PyGithub` | `mcp_server/github_server.py` |
+   | `eval`, `lint` | evaluation / ruff, ty, codespell | Evaluations and linting |
+
+   **Telemetry is off by default.** Nothing is sent to Google Cloud unless you install the `gcp` extra *and* opt in with `BONDY_CLOUD_LOGGING=1` (Cloud Logging) and/or `LOGS_BUCKET_NAME` + `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT` (GenAI telemetry).
 2. Install Playwright browsers (required for deterministic visual/focus skills):
    * **Windows / macOS / Linux**:
      ```bash
@@ -167,11 +180,33 @@ flowchart TD
 | `BONDY_VISION_MODEL` | `gemini-flash-latest` | Model for the vision tools (alt text, decorative images, page screenshot). |
 | `BONDY_API_KEY` | _unset_ | If set, `POST /api/apply-fix` requires an `X-API-Key` header. If unset, only localhost can write files. |
 
+### 2b. Command line (no API key needed)
+
+```bash
+bondy --version
+bondy doctor                              # checks Python, Chromium, axe-core, config, API key (offline)
+bondy scan ./my-site --no-llm             # deterministic scanners on a file or folder
+bondy scan page.html --format json --fail-on warning
+```
+
+`bondy scan` runs axe-core, contrast, keyboard focus (trap/order), `lang`, form labels and accessible-name checks. Exit code: `0` nothing at/above `--fail-on` (default `critical`), `1` findings at/above it, `2` usage/config error or a scanner failed (incomplete result). The LLM pipeline (alt-text quality, decorative images) is not wired into the CLI yet, so `scan` always runs deterministic checks only.
+
+**Configuration precedence: flag > environment variable > `bondy.toml` > default.** `bondy.toml` is searched upward from the current directory (or pass `--config`). Keys: `model`, `vision_model`, `fallback_model`, `no_llm`, `format` (`terminal`|`json`), `fail_on` (`critical`|`warning`|`never`), `checks`, `include`, `exclude`. Each key has an environment variable (`BONDY_MODEL`, `BONDY_VISION_MODEL`, `BONDY_FALLBACK_MODEL`, `BONDY_NO_LLM`, `BONDY_FORMAT`, `BONDY_FAIL_ON`, `BONDY_CHECKS`, `BONDY_INCLUDE`, `BONDY_EXCLUDE`; lists are comma-separated).
+
+```toml
+# bondy.toml
+fail_on = "warning"
+checks = ["WCAG 1.1.1", "WCAG 3.1.1"]
+exclude = ["node_modules/**", "dist/**"]
+```
+
+The API key is read from `GEMINI_API_KEY` (first) or `GOOGLE_API_KEY`; it is intentionally **not** accepted in `bondy.toml` because that file is meant to be committed. Variables already set in your shell are never overwritten by `.env`.
+
 ### 3. Run the API and Web UI Locally
 Launch the built-in FastAPI server to access the Bondy Web UI:
 * **Windows / macOS / Linux**:
   ```bash
-  uv run python -m uvicorn app.fast_api_app:app --reload --port 8080
+  uv run python -m uvicorn bondy.fast_api_app:app --reload --port 8080
   ```
   Go to `http://localhost:8080` to interact with the agent.
 
@@ -223,7 +258,7 @@ Validate agent configurations, types, and manifests:
 
 All tools follow the project's security rules (`.agents/AGENTS.md`):
 
-- **Path guardrail:** only files inside `demo_sites/` or raw HTML are audited; traversal and absolute paths are rejected (`app/app_utils/security.py`).
+- **Path guardrail:** only files inside `demo_sites/` or raw HTML are audited; traversal and absolute paths are rejected (`bondy/app_utils/security.py`).
 - **SSRF guard:** remote image/page URLs must resolve to public IPs; loopback, private and metadata addresses are blocked (`validate_public_url`). The axe scanner aborts every non-local network request made by the audited page.
 - **Write protection:** `POST /api/apply-fix` accepts only localhost, or a valid `X-API-Key` when `BONDY_API_KEY` is set, and refuses ambiguous replacements.
 

@@ -63,7 +63,7 @@ Instead of separate agents, the single agent has access to these deterministic a
 ### Common Data Contract Specifications
 
 ```yaml
-AuditFix:   # app/app_utils/audit_schema.py
+AuditFix:   # bondy/app_utils/audit_schema.py
   finding_id: string
   wcag: string
   severity: enum[critical, warning, info]
@@ -79,7 +79,7 @@ AuditFix:   # app/app_utils/audit_schema.py
 
 To meet secure coding standards, the project implements three layers of control:
 
-1. **Deterministic Path and Input Guardrail (`app/app_utils/security.py`):**
+1. **Deterministic Path and Input Guardrail (`bondy/app_utils/security.py`):**
    Before launching Playwright browser instances, the input source is evaluated. The agent is restricted from navigating to arbitrary external URLs. It only allows:
    * Explicit files or directories within the local `demo_sites/` sandbox.
    * Statically sanitized raw HTML inputs directly pasted by the user.
