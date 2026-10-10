@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from app.app_utils.vision_tools import decorative_heuristics
+from bondy.app_utils.vision_tools import decorative_heuristics
 
 ROOT = Path(__file__).parents[2]
 
@@ -39,7 +39,7 @@ def test_plain_informative_image_is_inconclusive():
 def test_render_page_produces_png(tmp_path):
     out = tmp_path / "shot.png"
     proc = subprocess.run(
-        [sys.executable, "-m", "app.app_utils.render_page", "--out", str(out)],
+        [sys.executable, "-m", "bondy.app_utils.render_page", "--out", str(out)],
         input="<html><body><h1>Hello</h1></body></html>",
         capture_output=True,
         text=True,
@@ -51,7 +51,7 @@ def test_render_page_produces_png(tmp_path):
     assert out.read_bytes()[:4] == b"\x89PNG"
 
 
-from app.app_utils.vision_tools import (  # noqa: E402
+from bondy.app_utils.vision_tools import (  # noqa: E402
     AltVerdict,
     alt_text_static_checks,
     decide_alt_recommendation,

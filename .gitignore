@@ -203,8 +203,8 @@ my_env.tfvars
 # A2A Inspector
 tools/a2a-inspector/
 
-# Old project backup folder
-Bondy/
+# Old project backup folder. NOT "Bondy/": git is case-insensitive on Windows/macOS
+# and that pattern would also ignore the package directory bondy/.
 Bondy-pasado/
 day1.md
 day2.md

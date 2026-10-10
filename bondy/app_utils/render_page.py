@@ -4,8 +4,8 @@ Runs as a separate process (see vision_tools.py) so Playwright's sync API never
 collides with the running asyncio event loop of the API server.
 
 Usage:
-    python -m app.app_utils.render_page --out shot.png --source demo_sites/site_1
-    python -m app.app_utils.render_page --out shot.png < page.html
+    python -m bondy.app_utils.render_page --out shot.png --source demo_sites/site_1
+    python -m bondy.app_utils.render_page --out shot.png < page.html
 """
 
 import argparse
@@ -23,7 +23,7 @@ MAX_HEIGHT = 4000
 
 def _is_public_host(host: str, cache: dict[str, bool]) -> bool:
     if host not in cache:
-        from app.app_utils.security import validate_public_url
+        from bondy.app_utils.security import validate_public_url
 
         try:
             validate_public_url(f"https://{host}/")
@@ -46,7 +46,7 @@ def render(html: str | None, source: str | None, out_path: str) -> None:
 
     temp_path = None
     if source:
-        from app.app_utils.security import get_safe_demo_path
+        from bondy.app_utils.security import get_safe_demo_path
 
         target = Path(get_safe_demo_path(source)).resolve()
     else:

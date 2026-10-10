@@ -1,6 +1,6 @@
 import pytest
 
-from app.app_utils.audit_schema import parse_audit_response
+from bondy.app_utils.audit_schema import parse_audit_response
 
 FIX = (
     '{"finding_id":"img-001","wcag":"1.1.1","severity":"Critical","title":"t",'

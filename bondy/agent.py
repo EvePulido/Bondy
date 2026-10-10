@@ -18,25 +18,18 @@ from google.adk.apps import App
 from google.adk.models import Gemini
 from google.adk.tools.skill_toolset import SkillToolset
 from google.genai import types
-from pathlib import Path
 
 # Load external WCAG guidelines and fix patterns
-patrones_path = (
-    Path(__file__).parent.parent
-    / ".agents"
-    / "skills"
-    / "suggestion-fix-generator"
-    / "references"
-    / "fix_patterns.md"
-)
-with open(patrones_path, encoding="utf-8") as f:
+from bondy.resources import FIX_PATTERNS_PATH, SKILLS_DIR
+
+with open(FIX_PATTERNS_PATH, encoding="utf-8") as f:
     WCAG_GUIDELINES = f.read()
 
 
 import os
 from google.adk.skills import load_skill_from_dir
 
-skills_dir = ".agents/skills"
+skills_dir = str(SKILLS_DIR)
 all_skills = [
     load_skill_from_dir(os.path.join(skills_dir, name))
     for name in os.listdir(skills_dir)
@@ -52,7 +45,7 @@ def read_local_file(file_path: str) -> str:
         file_path: The folder name of the demo site (e.g. 'demo_sites/site_1_bad_alt').
                    The function automatically resolves the full path to index.html.
     """
-    from app.app_utils.security import get_safe_demo_path
+    from bondy.app_utils.security import get_safe_demo_path
 
     safe_path = get_safe_demo_path(file_path)
 
@@ -60,7 +53,7 @@ def read_local_file(file_path: str) -> str:
         return f.read()
 
 
-from app.app_utils.vision_tools import (
+from bondy.app_utils.vision_tools import (
     analyze_rendered_page,
     classify_image_decorative,
     verify_image_alt_text,
@@ -166,4 +159,4 @@ Do NOT wrap the JSON in markdown code blocks. Return raw JSON only.
     ],
 )
 
-app = App(root_agent=root_agent, name="app")
+app = App(root_agent=root_agent, name="bondy")

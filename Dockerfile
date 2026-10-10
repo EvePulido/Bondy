@@ -20,19 +20,20 @@ WORKDIR /code
 
 COPY ./pyproject.toml ./README.md ./uv.lock* ./
 
-COPY ./app ./app
-COPY ./.agents ./.agents
-COPY ./web ./web
+COPY ./bondy ./bondy
 COPY ./demo_sites ./demo_sites
 
-RUN uv sync --frozen
+RUN uv sync --frozen --extra server --extra agent --extra gcp
 
 ARG COMMIT_SHA=""
 ENV COMMIT_SHA=${COMMIT_SHA}
+
+# Cloud deployments keep Cloud Logging (opt-in since the local/BYOK refactor)
+ENV BONDY_CLOUD_LOGGING=1
 
 ARG AGENT_VERSION=0.0.0
 ENV AGENT_VERSION=${AGENT_VERSION}
 
 EXPOSE 8080
 
-CMD ["uv", "run", "uvicorn", "app.fast_api_app:app", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["uv", "run", "uvicorn", "bondy.fast_api_app:app", "--host", "0.0.0.0", "--port", "8080"]

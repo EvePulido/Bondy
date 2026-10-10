@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from app.fast_api_app import _annotate_before_matches, app
+from bondy.fast_api_app import _annotate_before_matches, app
 
 DEMO = Path(__file__).parents[2] / "demo_sites"
 

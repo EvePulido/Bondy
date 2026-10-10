@@ -18,9 +18,9 @@ import os
 from dotenv import load_dotenv
 
 AGENT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-load_dotenv(dotenv_path=os.path.join(AGENT_DIR, ".env"), override=True)
+# override=False: variables already set in the environment win over .env
+load_dotenv(dotenv_path=os.path.join(AGENT_DIR, ".env"), override=False)
 
-import google.auth
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -28,25 +28,32 @@ from google.adk.apps import App
 from google.adk.cli.fast_api import get_fast_api_app
 from google.adk.models import Gemini
 from google.adk.runners import InMemoryRunner
-from google.cloud import logging as google_cloud_logging
 from google.genai import types
 from pydantic import BaseModel
 
-from app.agent import app as adk_app
-from app.app_utils.audit_schema import parse_audit_response
-from app.app_utils.security import validate_input_before_audit
-from app.app_utils.telemetry import setup_telemetry
-from app.app_utils.typing import Feedback
+from bondy.agent import app as adk_app
+from bondy.app_utils.audit_schema import parse_audit_response
+from bondy.app_utils.security import validate_input_before_audit
+from bondy.app_utils.telemetry import setup_telemetry
+from bondy.app_utils.typing import Feedback
+from bondy.resources import AXE_SCAN_SCRIPT, WEB_DIR
 
 setup_telemetry()
-try:
-    _, project_id = google.auth.default()
-    logging_client = google_cloud_logging.Client()
-    logger = logging_client.logger(__name__)
-except Exception:
-    import logging
+# Cloud Logging is opt-in (BONDY_CLOUD_LOGGING=1, needs the `gcp` extra); by
+# default feedback and warnings go to the standard Python logger only.
+import logging
 
-    logger = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
+if os.getenv("BONDY_CLOUD_LOGGING") == "1":
+    try:
+        import google.auth
+        from google.cloud import logging as google_cloud_logging
+
+        google.auth.default()
+        logger = google_cloud_logging.Client().logger(__name__)
+    except Exception as e:
+        logging.warning(f"Cloud Logging unavailable, using stdlib logging: {e}")
+else:
     logging.basicConfig(level=logging.INFO)
 allow_origins = (
     os.getenv("ALLOW_ORIGINS", "").split(",") if os.getenv("ALLOW_ORIGINS") else None
@@ -101,10 +108,7 @@ def collect_feedback(feedback: Feedback) -> dict[str, str]:
 
 
 # --- Bondy Web UI & API ---
-if not os.path.exists("web"):
-    os.makedirs("web")
-
-app.mount("/static", StaticFiles(directory="web"), name="static")
+app.mount("/static", StaticFiles(directory=str(WEB_DIR)), name="static")
 
 
 class AuditRequest(BaseModel):
@@ -119,13 +123,7 @@ class ApplyFixRequest(BaseModel):
     after: str
 
 
-_AXE_SCRIPT = (
-    os.path.join(AGENT_DIR, ".agents", "skills", "axe-accessibility-scanner")
-    + os.sep
-    + "scripts"
-    + os.sep
-    + "axe_scan.py"
-)
+_AXE_SCRIPT = str(AXE_SCAN_SCRIPT)
 
 
 def _compute_axe_stats(raw_html: str | None, source: str) -> dict | None:
@@ -138,7 +136,7 @@ def _compute_axe_stats(raw_html: str | None, source: str) -> dict | None:
 
     try:
         if raw_html is None:
-            from app.app_utils.security import get_safe_demo_path
+            from bondy.app_utils.security import get_safe_demo_path
 
             with open(get_safe_demo_path(source), encoding="utf-8") as f:
                 raw_html = f.read()
@@ -174,7 +172,7 @@ def _build_fallback_app() -> App:
             )
         }
     )
-    return App(root_agent=agent, name="app")
+    return App(root_agent=agent, name="bondy")
 
 
 def _annotate_before_matches(fixes: list[dict], source: str) -> None:
@@ -183,7 +181,7 @@ def _annotate_before_matches(fixes: list[dict], source: str) -> None:
     0 -> the snippet is not in the file (model altered it); 1 -> safe;
     >1 -> ambiguous, replacing the first match could edit the wrong place.
     """
-    from app.app_utils.security import get_safe_demo_path
+    from bondy.app_utils.security import get_safe_demo_path
 
     try:
         with open(get_safe_demo_path(source), encoding="utf-8") as f:
@@ -214,7 +212,7 @@ def _skip_note(enabled_checks: list[str] | None) -> str:
 
 @app.get("/")
 async def root_ui():
-    return FileResponse("web/index.html")
+    return FileResponse(WEB_DIR / "index.html")
 
 
 @app.post("/api/audit")
@@ -235,7 +233,7 @@ async def run_audit(req: AuditRequest):
                 app=_build_fallback_app() if use_fallback else adk_app
             )
             session = await runner.session_service.create_session(
-                app_name="app", user_id="web_user"
+                app_name="bondy", user_id="web_user"
             )
 
             if req.enabled_checks:
@@ -354,7 +352,7 @@ file_locks = defaultdict(asyncio.Lock)
 
 @app.post("/api/apply-fix")
 async def apply_fix(req: ApplyFixRequest, request: Request):
-    from app.app_utils.security import get_safe_demo_path
+    from bondy.app_utils.security import get_safe_demo_path
 
     # This endpoint writes to disk: require an API key if configured,
     # otherwise only accept requests coming from the local machine.

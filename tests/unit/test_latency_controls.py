@@ -1,7 +1,7 @@
 from unittest.mock import MagicMock, patch
 
-from app.app_utils import vision_tools
-from app.app_utils.vision_tools import _quota_retry_delay
+from bondy.app_utils import vision_tools
+from bondy.app_utils.vision_tools import _quota_retry_delay
 
 
 def test_quota_delay_parses_retry_in_seconds():
@@ -32,7 +32,7 @@ def test_generate_retries_same_model_once_on_quota_error():
 
 
 def test_skip_note_only_for_images_only_audit():
-    from app.fast_api_app import _skip_note
+    from bondy.fast_api_app import _skip_note
 
     assert "STEP 1.5" in _skip_note(["WCAG 1.1.1"])
     assert _skip_note(["WCAG 1.1.1", "WCAG 3.1.1"]) == ""

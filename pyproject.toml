@@ -8,18 +8,16 @@ authors = [
 
 
 
+# Core: deterministic scanners + Gemini client. No server, ADK or GCP.
 dependencies = [
-    "google-adk[gcp]>=2.0.0,<3.0.0",
-    "opentelemetry-instrumentation-google-genai>=0.1.0,<1.0.0",
-    "gcsfs>=2024.11.0",
-    "google-cloud-logging>=3.12.0,<4.0.0",
     "playwright>=1.40.0",
-    "mcp>=1.0.0",
-    "fastapi>=0.100.0",
-    "uvicorn>=0.22.0",
-    "PyGithub>=2.1.0",
+    "google-genai>=1.0.0",
+    "pydantic>=2.0.0",
 ]
 requires-python = ">=3.11,<3.14"
+
+[project.scripts]
+bondy = "bondy.cli:main"
 
 
 [dependency-groups]
@@ -28,9 +26,34 @@ dev = [
     "pytest-asyncio>=1.0.0,<2.0.0",
     "nest-asyncio>=1.6.0,<2.0.0",
     "pre-commit>=3.7.1,<4.0.0",
+    # The unit tests exercise the web app, which needs the server and agent extras
+    "bondy[server,agent]",
 ]
 
 [project.optional-dependencies]
+# Local web UI + HTTP API (`bondy.fast_api_app`). Requires `agent` as well today.
+server = [
+    "fastapi>=0.100.0",
+    "uvicorn>=0.22.0",
+    "python-dotenv>=1.0.0",
+]
+# ADK agent mode (BondyAccessibilityAgent).
+agent = [
+    "google-adk>=2.0.0,<3.0.0",
+]
+# Optional Google Cloud integrations (Cloud Logging, GCS artifacts, OTel GenAI
+# telemetry, Vertex AI extras of ADK). Off by default; see README.
+gcp = [
+    "google-adk[gcp]>=2.0.0,<3.0.0",
+    "opentelemetry-instrumentation-google-genai>=0.1.0,<1.0.0",
+    "gcsfs>=2024.11.0",
+    "google-cloud-logging>=3.12.0,<4.0.0",
+]
+# GitHub reader MCP server (`mcp_server/github_server.py`).
+mcp = [
+    "mcp>=1.0.0",
+    "PyGithub>=2.1.0",
+]
 eval = [
     "google-adk[eval]>=2.0.0,<3.0.0",
     "google-cloud-aiplatform[evaluation]>=1.156.0",
@@ -62,7 +85,7 @@ select = [
 ignore = ["E501", "C901", "B006"] # ignore line too long, too complex
 
 [tool.ruff.lint.isort]
-known-first-party = ["app", "frontend"]
+known-first-party = ["bondy"]
 
 [tool.ty]
 # ty is Astral's Rust-based type checker (same team as ruff/uv)
@@ -102,6 +125,6 @@ pythonpath = "."
 asyncio_default_fixture_loop_scope = "function"
 
 [tool.hatch.build.targets.wheel]
-packages = ["app"]
+packages = ["bondy"]
 
 

@@ -12,6 +12,17 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from .agent import app
-
 __all__ = ["app"]
+
+
+def __getattr__(name: str):
+    """Lazily expose the ADK `app` so the core package imports without ADK.
+
+    ADK's agent loader looks for `app`/`root_agent` on the package; importing
+    `bondy.agent` is deferred until that attribute is actually requested.
+    """
+    if name == "app":
+        from .agent import app
+
+        return app
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

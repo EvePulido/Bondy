@@ -72,7 +72,7 @@ def _generate(contents: list, json_output: bool = False, schema=None) -> str:
 def _load_image(url: str) -> tuple[bytes, str]:
     """Loads an image from a public URL or from the local demo_sites folder."""
     if url.startswith(("http://", "https://")):
-        from app.app_utils.security import validate_public_url
+        from bondy.app_utils.security import validate_public_url
 
         validate_public_url(url)
         req = urllib.request.Request(url, headers={"User-Agent": "Bondy/1.0"})
@@ -369,7 +369,7 @@ def analyze_rendered_page(source: str = "", html: str = "") -> str:
 
         fd, out_png = tempfile.mkstemp(suffix=".png")
         os.close(fd)
-        cmd = [sys.executable, "-m", "app.app_utils.render_page", "--out", out_png]
+        cmd = [sys.executable, "-m", "bondy.app_utils.render_page", "--out", out_png]
         if source:
             cmd += ["--source", source]
         proc = subprocess.run(
