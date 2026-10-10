@@ -11,6 +11,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 import urllib.request
 from pathlib import Path
 from typing import Literal
@@ -24,6 +25,19 @@ MAX_IMAGE_BYTES = 10 * 1024 * 1024
 
 
 # ----- Shared helpers -----
+def _quota_retry_delay(error: Exception) -> float | None:
+    """Seconds to wait if `error` is a 429 quota error, else None (max 60 s)."""
+    msg = str(error)
+    if "429" not in msg and "RESOURCE_EXHAUSTED" not in msg:
+        return None
+    if "PerDay" in msg:
+        return None  # daily quota: waiting seconds will not help
+    m = re.search(r"retry in (\d+\.?\d*)s", msg) or re.search(
+        r"retryDelay'?\"?: '?\"?(\d+)s", msg
+    )
+    return min(float(m.group(1)) + 1.0, 60.0) if m else 10.0
+
+
 def _generate(contents: list, json_output: bool = False, schema=None) -> str:
     """Calls Gemini with the primary vision model, then the fallback if it is busy.
 
@@ -40,13 +54,18 @@ def _generate(contents: list, json_output: bool = False, schema=None) -> str:
     )
     last_error: Exception | None = None
     for model in [m for m in (VISION_MODEL, FALLBACK_MODEL) if m]:
-        try:
-            res = client.models.generate_content(
-                model=model, contents=contents, config=config
-            )
-            return res.text or ""
-        except Exception as e:  # 503 / quota / model unavailable -> try next model
-            last_error = e
+        for attempt in range(2):
+            try:
+                res = client.models.generate_content(
+                    model=model, contents=contents, config=config
+                )
+                return res.text or ""
+            except Exception as e:  # 503 / quota / model unavailable
+                last_error = e
+                delay = _quota_retry_delay(e)
+                if delay is None or attempt == 1:
+                    break  # not a quota error, or already retried: next model
+                time.sleep(delay)  # wait out the per-minute quota, retry same model
     raise RuntimeError(f"All vision models failed: {last_error}")
 
 

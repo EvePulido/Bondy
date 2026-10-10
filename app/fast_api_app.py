@@ -165,7 +165,14 @@ FALLBACK_MODEL = os.getenv("BONDY_FALLBACK_MODEL", "gemini-3.5-flash-lite")
 def _build_fallback_app() -> App:
     """Same agent and tools, running on the backup model."""
     agent = adk_app.root_agent.model_copy(
-        update={"model": Gemini(model=FALLBACK_MODEL)}
+        update={
+            "model": Gemini(
+                model=FALLBACK_MODEL,
+                retry_options=types.HttpRetryOptions(
+                    attempts=5, initial_delay=5, max_delay=60
+                ),
+            )
+        }
     )
     return App(root_agent=agent, name="app")
 
@@ -186,6 +193,23 @@ def _annotate_before_matches(fixes: list[dict], source: str) -> None:
     for fix in fixes:
         before = fix.get("before") or ""
         fix["before_occurrences"] = content.count(before) if before else 0
+
+
+def _skip_note(enabled_checks: list[str] | None) -> str:
+    """Extra instruction for image-only audits.
+
+    With only WCAG 1.1.1 selected, the axe baseline and the rendered-page visual
+    check add Gemini requests (and quota usage) without adding findings the
+    per-image tools do not already cover, so the agent skips them.
+    """
+    if enabled_checks and {c.strip() for c in enabled_checks} == {"WCAG 1.1.1"}:
+        return (
+            "Skip STEP 1.5 (axe baseline) and STEP 1.7 (analyze_rendered_page): "
+            "they are not needed for an images-only audit. "
+            "Do verify every <img> with verify_image_alt_text and "
+            "classify_image_decorative as instructed."
+        )
+    return ""
 
 
 @app.get("/")
@@ -219,6 +243,8 @@ async def run_audit(req: AuditRequest):
                 extra_instruction = f"Only audit the following criteria: {checks_str}. Ignore all other criteria."
             else:
                 extra_instruction = "Audit all criteria (WCAG 1.1.1, WCAG 1.3.1, WCAG 1.4.3, WCAG 2.4.4, WCAG 3.1.1, WCAG 2.1.2, WCAG 2.4.3)."
+
+            extra_instruction += _skip_note(req.enabled_checks)
 
             if req.raw_html:
                 prompt = (
@@ -278,6 +304,15 @@ async def run_audit(req: AuditRequest):
 
         except Exception as e:
             err_msg = str(e)
+            if "PerDay" in err_msg:
+                # Daily free-tier quota: retrying within seconds cannot succeed
+                return JSONResponse(
+                    {
+                        "status": "error",
+                        "message": "Daily Gemini quota exhausted for this API key/model. Recovery: wait for the quota reset, use a billing-enabled key or Vertex AI, or set BONDY_FALLBACK_MODEL to another model.",
+                    },
+                    status_code=429,
+                )
             is_rate_limit = "429" in err_msg or "RESOURCE_EXHAUSTED" in err_msg
             is_overloaded = "503" in err_msg or "UNAVAILABLE" in err_msg
             if is_rate_limit or is_overloaded:

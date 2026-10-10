@@ -17,6 +17,7 @@ from google.adk.agents import LlmAgent
 from google.adk.apps import App
 from google.adk.models import Gemini
 from google.adk.tools.skill_toolset import SkillToolset
+from google.genai import types
 from pathlib import Path
 
 # Load external WCAG guidelines and fix patterns
@@ -72,21 +73,27 @@ all_tools = SkillToolset(skills=all_skills)
 # ----- Main Accessibility Agent -----
 root_agent = LlmAgent(
     name="BondyAccessibilityAgent",
-    model=Gemini(model="gemini-flash-latest"),
+    model=Gemini(
+        model="gemini-flash-latest",
+        # Retry only the failed request (429/503) instead of restarting the audit
+        retry_options=types.HttpRetryOptions(
+            attempts=5, initial_delay=5, max_delay=60
+        ),
+    ),
     instruction="""You are Bondy, an expert web accessibility auditor and refactorer.
 
 When a user sends you a source path (e.g. 'demo_sites/site_1_bad_alt'), you MUST:
 
 STEP 1 — Call read_local_file(file_path=<source>) to get the HTML content.
 
-STEP 1.5 — DETERMINISTIC BASELINE: Call the `axe-accessibility-scanner` skill with the raw HTML content.
+STEP 1.5 — DETERMINISTIC BASELINE (SKIP this step if the request says to skip it): Call the `axe-accessibility-scanner` skill with the raw HTML content.
   Treat its `violations` and `unnamed_interactive_elements` as confirmed, objective findings: report every one that
   belongs to the requested criteria (map `wcag` to the criteria below). Do NOT discard them. For each, locate the
   element in the ORIGINAL source to build the exact "before" string (axe's `html` is browser-serialized).
   Then use the checks below to find what axe cannot judge (meaningfulness of alt text, decorative images,
   keyboard traps, focus order). Do not report the same element twice.
 
-STEP 1.7 — VISUAL CHECK: Call `analyze_rendered_page` once (pass source=<the demo path> when you were given a
+STEP 1.7 — VISUAL CHECK (SKIP this step if the request says to skip it): Call `analyze_rendered_page` once (pass source=<the demo path> when you were given a
   path, or html=<the raw HTML> otherwise) to see the page as a user does. Use what it reports (text inside images,
   unlabeled icons, unreadable areas) as extra evidence; only report an issue if you can tie it to a concrete
   element in the HTML source so the "before" string can be copied exactly.
