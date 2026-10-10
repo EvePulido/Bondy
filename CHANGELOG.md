@@ -5,6 +5,10 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- `bondy/app_utils/browser.py`: lanzador único de navegador (Chromium de Playwright -> Chrome -> Edge del sistema, con error accionable) y `open_page()`, que aborta toda petición salvo `file://` del propio archivo, `data:` y `about:` (y deshabilita descargas, service workers y WebSockets).
+- Modo estático: sin navegador utilizable `bondy scan` no falla; ejecuta lang/labels/accessible-name/img-alt por HTML, indica qué checks omitió en `notes` (`static_mode`, `omitted_checks` en JSON) y mantiene los códigos de salida 0/1.
+- `bondy doctor` lanza el navegador y reporta cuál se usará (o avisa del modo estático con el comando de instalación).
+- `tests/unit/test_network_guard.py` (0 peticiones a un servidor local por escáner, política, fallback del lanzador) y `tests/unit/test_static_mode.py`.
 - `/api/audit` anota cada fix con `before_occurrences`; la UI solo ofrece "Apply to File" si el fragmento aparece exactamente una vez y explica por qué no cuando son 0 o más de 1.
 - `tests/unit/test_apply_fix.py`: tests de aplicación única, ambigüedad (409) y rechazo de clientes remotos.
 - `app/app_utils/render_page.py`: renderiza páginas a PNG con Chromium en un subproceso. Solo permite `file://` dentro de `demo_sites/` y hosts http(s) públicos (anti-SSRF).
@@ -23,6 +27,7 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 - `docs/improvement-plan.md`: plan v2 (herramienta local, portable y con la API key del propio desarrollador).
 
 ### Changed
+- `contrast.py`, `focus_trap.py` y `focus_order.py` ya no navegan a contenido que empieza por `http(s)://` ni cargan recursos remotos (antes no tenían bloqueo de red); `axe_scan.py` ya no permite `file:` ajenos. `render_page.py` usa el mismo guard (mantiene los hosts públicos verificados).
 - `/api/apply-fix` rechaza con 409 los reemplazos ambiguos (el `before` aparece más de una vez).
 - `.env.example` y README: opción gratuita con API key de AI Studio, variables `BONDY_*`, descripción de seguridad actualizada.
 - `verify_image_alt_text` movida a `vision_tools.py` y rediseñada: reglas de grounding (solo lo visible, sin inventar raza/ropa/marca), datos no confiables delimitados, ejemplos few-shot, temperatura 0, salida estructurada (`AltVerdict`), chequeos estáticos deterministas del alt y decisión `keep`/`fix`/`needs_manual_review` en código. La instrucción del agente indica cómo usar `recommendation` y `suggested_alt`.
@@ -44,6 +49,8 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 - Reintento de la petición fallida (429/503) con `HttpRetryOptions` en vez de reiniciar toda la auditoría; la cuota diaria (`PerDay`) no se reintenta y `/api/audit` responde 429 con un mensaje claro.
 - La skill `git-commit-formatter` sale del proyecto y pasa a `~/.claude/skills/` (global, solo para desarrollo).
 - `.gitignore`: se quita `Bondy/`, que por ser insensible a mayúsculas ignoraba también el paquete `bondy/`.
+- `render_page.py` ya no permite hosts http(s) remotos: la captura de visión es solo local (`file://` del archivo y `demo_sites/`).
+- `bondy scan --static` (o `BONDY_STATIC=1` / `static = true`): fuerza el modo estático sin lanzar navegador, útil en CI.
 
 ### Fixed
 - `pyproject.toml`: eliminado el paquete inexistente `frontend` de hatch.
