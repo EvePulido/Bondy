@@ -9,11 +9,13 @@ from __future__ import annotations
 import fnmatch
 import importlib.util
 import os
+import re
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from bondy.app_utils.browser import INSTALL_COMMAND, BrowserUnavailableError
 from bondy.app_utils.security import validate_input_before_audit
 from bondy.resources import SKILLS_DIR
 
@@ -29,6 +31,10 @@ class FileResult:
     findings: list[dict[str, Any]] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
     skipped: str | None = None
+    # checks that could not run (name -> reason), e.g. no browser: not an error
+    omitted: dict[str, str] = field(default_factory=dict)
+    # browser-free replacements that ran instead of an omitted check
+    fallbacks: list[str] = field(default_factory=list)
 
 
 # ----- Discovery -----
@@ -203,6 +209,30 @@ def _run_names(html: str) -> list[dict]:
     ]
 
 
+_IMG_TAG = re.compile(r"<img\b[^>]*>", re.IGNORECASE)
+_ALT_ATTR = re.compile(r"(?<![\w-])alt\s*=", re.IGNORECASE)
+_PRESENTATION = re.compile(r"""role\s*=\s*["']?(presentation|none)\b""", re.IGNORECASE)
+
+
+def _run_img_alt(html: str) -> list[dict]:
+    """Static stand-in for axe's ``image-alt``: <img> with no alt attribute."""
+    out = []
+    for m in _IMG_TAG.finditer(html):
+        tag = m.group(0)
+        if _ALT_ATTR.search(tag) or _PRESENTATION.search(tag):
+            continue
+        out.append(
+            _finding(
+                "img-alt",
+                ["1.1.1"],
+                "critical",
+                "<img> has no alt attribute",
+                nodes=[{"html": tag[:300]}],
+            )
+        )
+    return out
+
+
 SCANNERS: dict[str, Scanner] = {
     "axe": _run_axe,
     "contrast": _run_contrast,
@@ -212,6 +242,14 @@ SCANNERS: dict[str, Scanner] = {
     "labels": _run_labels,
     "accessible-name": _run_names,
 }
+
+
+# Scanners that need a rendered page (they fail with BrowserUnavailableError when
+# no browser exists) and the browser-free check that partly replaces each one.
+BROWSER_SCANNERS = {"axe", "contrast", "focus-trap", "focus-order"}
+STATIC_FALLBACKS: dict[str, tuple[str, Scanner]] = {"axe": ("img-alt", _run_img_alt)}
+STATIC_FORCED = "static mode forced"
+STATIC_FORCED_REASON = "skipped: static mode forced (--static)"
 
 
 def _read_text(path: Path) -> str:
@@ -226,28 +264,51 @@ def _criteria(checks: Iterable[str]) -> set[str]:
     return {c.strip().removeprefix("WCAG").strip() for c in checks if c.strip()}
 
 
+def run_scanners(
+    html: str,
+    checks: Iterable[str] = (),
+    scanners: dict[str, Scanner] | None = None,
+) -> tuple[list[dict], list[str], dict[str, str]]:
+    """Runs every scanner on ``html``. Returns (findings, errors, unavailable).
+
+    A failing scanner is reported in ``errors`` and does not abort the others.
+    A scanner that cannot start because no browser exists goes to
+    ``unavailable`` (name -> reason) instead, and its static fallback (if any)
+    runs in its place. ``checks`` (e.g. ``["WCAG 1.1.1"]``) keeps only findings
+    that map to those criteria.
+    """
+    findings: list[dict] = []
+    errors: list[str] = []
+    unavailable: dict[str, str] = {}
+    for name, run in (scanners or SCANNERS).items():
+        try:
+            findings.extend(run(html))
+        except BrowserUnavailableError as e:
+            unavailable[name] = str(e)
+        except Exception as e:
+            lines = str(e).strip().splitlines()
+            errors.append(f"{name}: {type(e).__name__}: {lines[0] if lines else ''}")
+    for name in unavailable:
+        fallback = STATIC_FALLBACKS.get(name)
+        if fallback:
+            try:
+                findings.extend(fallback[1](html))
+            except Exception as e:
+                errors.append(f"{fallback[0]}: {type(e).__name__}: {e}")
+    wanted = _criteria(checks)
+    if wanted:
+        findings = [f for f in findings if wanted & set(f["wcag"])]
+    return findings, errors, unavailable
+
+
 def scan_html(
     html: str,
     checks: Iterable[str] = (),
     scanners: dict[str, Scanner] | None = None,
 ) -> tuple[list[dict], list[str]]:
-    """Runs every scanner on ``html``. Returns (findings, errors).
-
-    A failing scanner (e.g. browser missing) is reported in ``errors`` and does
-    not abort the others. ``checks`` (e.g. ``["WCAG 1.1.1"]``) keeps only
-    findings that map to those criteria.
-    """
-    findings: list[dict] = []
-    errors: list[str] = []
-    for name, run in (scanners or SCANNERS).items():
-        try:
-            findings.extend(run(html))
-        except Exception as e:
-            lines = str(e).strip().splitlines()
-            errors.append(f"{name}: {type(e).__name__}: {lines[0] if lines else ''}")
-    wanted = _criteria(checks)
-    if wanted:
-        findings = [f for f in findings if wanted & set(f["wcag"])]
+    """Like ``run_scanners`` but an unavailable browser is reported as an error."""
+    findings, errors, unavailable = run_scanners(html, checks, scanners)
+    errors += [f"{name}: BrowserUnavailableError" for name in unavailable]
     return findings, errors
 
 
@@ -257,8 +318,13 @@ def scan_path(
     exclude: Iterable[str],
     checks: Iterable[str] = (),
     scanners: dict[str, Scanner] | None = None,
+    force_static: bool = False,
 ) -> list[FileResult]:
     results: list[FileResult] = []
+    active = dict(scanners or SCANNERS)
+    # Reason the browser scanners were dropped; set on the first launch failure
+    # so later files do not retry (and re-fail) the launch for every scanner.
+    browser_down: str | None = STATIC_FORCED if force_static else None
     for path in discover(target, include, exclude):
         result = FileResult(path=str(path))
         results.append(result)
@@ -273,8 +339,53 @@ def scan_path(
         except (OSError, ValueError) as e:
             result.errors.append(str(e))
             continue
-        result.findings, result.errors = scan_html(html, checks, scanners)
+        to_run = active
+        if browser_down is not None:
+            to_run = {n: r for n, r in active.items() if n not in BROWSER_SCANNERS}
+            for n in active:
+                if n in BROWSER_SCANNERS and n in STATIC_FALLBACKS:
+                    fb_name, fb = STATIC_FALLBACKS[n]
+                    to_run[fb_name] = fb
+        result.findings, result.errors, unavailable = run_scanners(html, checks, to_run)
+        if browser_down is None and unavailable:
+            browser_down = next(iter(unavailable.values()))
+        if browser_down is not None:
+            dropped = [n for n in active if n in BROWSER_SCANNERS]
+            reason = (
+                STATIC_FORCED_REASON
+                if browser_down == STATIC_FORCED
+                else "needs a browser (none available)"
+            )
+            result.omitted = dict.fromkeys(dropped, reason)
+            result.fallbacks = [
+                STATIC_FALLBACKS[n][0] for n in dropped if n in STATIC_FALLBACKS
+            ]
     return results
+
+
+def static_mode_note(results: Iterable[FileResult]) -> str | None:
+    """Human-readable explanation when browser scanners were skipped."""
+    omitted: dict[str, str] = {}
+    fallbacks: list[str] = []
+    for r in results:
+        omitted.update(r.omitted)
+        fallbacks += [f for f in r.fallbacks if f not in fallbacks]
+    if not omitted:
+        return None
+    ran = [n for n in SCANNERS if n not in BROWSER_SCANNERS] + fallbacks
+    forced = all(v == STATIC_FORCED_REASON for v in omitted.values())
+    why = (
+        "it was requested with --static, so"
+        if forced
+        else "no usable browser was found, so"
+    )
+    return (
+        f"STATIC MODE: {why} checks that need a rendered "
+        f"page were skipped: {', '.join(omitted)} (contrast, keyboard focus and axe "
+        "rules). Only HTML-parsing checks ran: "
+        f"{', '.join(ran)}; they are less precise than the full scan. "
+        + ("" if forced else f"Install a browser with: {INSTALL_COMMAND}")
+    )
 
 
 def worst_severity(results: Iterable[FileResult]) -> int:

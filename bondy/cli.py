@@ -2,6 +2,8 @@
 
 Exit codes for ``scan``: 0 = nothing at/above ``--fail-on``; 1 = findings at or
 above the threshold; 2 = usage/config error or a scanner failed (incomplete).
+Without any usable browser the scan runs in static mode (HTML parsing only),
+says so in ``notes`` and still exits 0/1.
 """
 
 from __future__ import annotations
@@ -44,6 +46,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="deterministic scanners only (no API key, no network)",
     )
+    scan.add_argument(
+        "--static",
+        action="store_true",
+        default=None,
+        help="force static mode: HTML-parsing checks only, never launch a browser",
+    )
     scan.add_argument("--format", choices=["terminal", "json"], help="output format")
     scan.add_argument(
         "--fail-on",
@@ -84,10 +92,11 @@ def _render_terminal(results, notes: list[str]) -> str:
 
 
 def _cmd_scan(args: argparse.Namespace) -> int:
-    from bondy.scan import exit_code, scan_path
+    from bondy.scan import exit_code, scan_path, static_mode_note
 
     flags = {
         "no_llm": args.no_llm,
+        "static": args.static,
         "format": args.format,
         "fail_on": args.fail_on,
         "checks": args.checks,
@@ -110,7 +119,11 @@ def _cmd_scan(args: argparse.Namespace) -> int:
 
     try:
         results = scan_path(
-            Path(args.path), settings.include, settings.exclude, settings.checks
+            Path(args.path),
+            settings.include,
+            settings.exclude,
+            settings.checks,
+            force_static=settings.static,
         )
     except FileNotFoundError as e:
         print(f"bondy: {e}", file=sys.stderr)
@@ -118,6 +131,9 @@ def _cmd_scan(args: argparse.Namespace) -> int:
 
     if not results:
         notes.append("No HTML files found to scan.")
+    static_note = static_mode_note(results)
+    if static_note:
+        notes.append(static_note)
     code = exit_code(results, settings.fail_on)
 
     if settings.format == "json":
@@ -125,12 +141,14 @@ def _cmd_scan(args: argparse.Namespace) -> int:
             "version": _version(),
             "mode": "no-llm",
             "exit_code": code,
+            "static_mode": static_note is not None,
             "notes": notes,
             "files": [
                 {
                     "path": r.path,
                     "skipped": r.skipped,
                     "errors": r.errors,
+                    "omitted_checks": r.omitted,
                     "findings": r.findings,
                 }
                 for r in results

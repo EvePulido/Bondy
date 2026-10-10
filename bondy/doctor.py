@@ -8,37 +8,22 @@ from __future__ import annotations
 
 import os
 import re
-import shutil
 import sys
 import tempfile
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
+from bondy.app_utils.browser import (
+    INSTALL_COMMAND,
+    BrowserUnavailableError,
+    find_system_browsers,
+    launch_with_label,
+)
 from bondy.config import API_KEY_ENV_VARS, ConfigError, load_settings
 from bondy.resources import SKILLS_DIR
 
 PYTHON_MIN, PYTHON_MAX_EXCL = (3, 11), (3, 14)
-
-_SYSTEM_BROWSER_CANDIDATES = {
-    "chrome": [
-        "google-chrome",
-        "google-chrome-stable",
-        "chrome",
-        "chromium",
-        "chromium-browser",
-        r"C:\Program Files\Google\Chrome\Application\chrome.exe",
-        r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
-        "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-    ],
-    "msedge": [
-        "microsoft-edge",
-        "msedge",
-        r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
-        r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
-        "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
-    ],
-}
 
 
 @dataclass
@@ -76,48 +61,39 @@ def check_playwright_package() -> Check:
         )
 
 
-def find_system_browsers() -> dict[str, str]:
-    found: dict[str, str] = {}
-    for channel, candidates in _SYSTEM_BROWSER_CANDIDATES.items():
-        for candidate in candidates:
-            path = shutil.which(candidate) or (
-                candidate
-                if os.path.isabs(candidate) and os.path.exists(candidate)
-                else None
-            )
-            if path:
-                found[channel] = path
-                break
-    return found
-
-
 def check_browser() -> Check:
-    chromium_path: str | None = None
+    """Launches the browser the scanners would use and reports which one it is."""
     try:
         from playwright.sync_api import sync_playwright
 
         with sync_playwright() as p:
-            chromium_path = p.chromium.executable_path
-    except Exception:
-        chromium_path = None
-    if chromium_path and os.path.exists(chromium_path):
-        return Check("browser", "ok", f"Playwright Chromium: {chromium_path}")
-    system = find_system_browsers()
-    if system:
-        names = ", ".join(f"{k} ({v})" for k, v in system.items())
+            browser, label = launch_with_label(p)
+            browser.close()
+        return Check("browser", "ok", f"Scans will use: {label}")
+    except BrowserUnavailableError:
+        system = find_system_browsers()
+        found = (
+            " Found on disk but not launchable: "
+            + ", ".join(f"{k} ({v})" for k, v in system.items())
+            + "."
+            if system
+            else ""
+        )
         return Check(
             "browser",
             "warn",
-            f"Playwright Chromium is not installed, but a system browser exists: {names}. "
-            "The bundled scanners still require Playwright Chromium today.",
-            "uv run playwright install chromium",
+            "No usable browser: `bondy scan` will run in STATIC mode (HTML parsing "
+            "only; axe, contrast and focus checks are skipped)." + found,
+            INSTALL_COMMAND,
         )
-    return Check(
-        "browser",
-        "fail",
-        "No Chromium found (neither Playwright's nor a system Chrome/Edge)",
-        "playwright install chromium",
-    )
+    except Exception as e:  # playwright itself missing or broken
+        return Check(
+            "browser",
+            "warn",
+            f"Could not start a browser ({type(e).__name__}); scans will run in "
+            "STATIC mode.",
+            INSTALL_COMMAND,
+        )
 
 
 def check_api_key(env: Mapping[str, str] | None = None) -> Check:

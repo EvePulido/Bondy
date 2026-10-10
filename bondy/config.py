@@ -71,6 +71,8 @@ _FIELDS: dict[str, tuple[Any, str | None, Any]] = {
     # An empty string disables the fallback model (same as the old env var).
     "fallback_model": (_to_str, "BONDY_FALLBACK_MODEL", "gemini-3.5-flash-lite"),
     "no_llm": (_to_bool, "BONDY_NO_LLM", False),
+    # Force browser-free (static) mode, e.g. in CI without a browser.
+    "static": (_to_bool, "BONDY_STATIC", False),
     "format": (_choice("terminal", "json"), "BONDY_FORMAT", "terminal"),
     "fail_on": (_choice("critical", "warning", "never"), "BONDY_FAIL_ON", "critical"),
     "checks": (_to_str_list, "BONDY_CHECKS", []),
@@ -91,6 +93,7 @@ class Settings:
     vision_model: str
     fallback_model: str
     no_llm: bool
+    static: bool
     format: str
     fail_on: str
     checks: list[str]
