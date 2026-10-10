@@ -59,85 +59,14 @@ def read_local_file(file_path: str) -> str:
         return f.read()
 
 
+from app.app_utils.vision_tools import (
+    analyze_rendered_page,
+    classify_image_decorative,
+    verify_image_alt_text,
+)
+
 # All skills combined into a single toolset
 all_tools = SkillToolset(skills=all_skills)
-
-
-def verify_image_alt_text(url: str, current_alt: str) -> str:
-    """
-    CRITICAL TOOL: Downloads an image from a URL and uses Gemini Vision to verify if the
-    current_alt text accurately describes the image. MUST be used for WCAG 1.1.1.
-
-    Args:
-        url: The URL of the image to analyze (e.g., https://...).
-        current_alt: The existing alt text found in the HTML.
-
-    Returns:
-        A description from the vision model of what the image actually contains.
-    """
-    import urllib.request
-    import os
-    import mimetypes
-    from google.genai import Client, types
-
-    try:
-        if not url.startswith("http"):
-            base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-            demo_sites_dir = os.path.join(base_dir, "demo_sites")
-            found_path = None
-            target_suffix = url.replace("/", os.sep)
-
-            for root_dir, _, files in os.walk(demo_sites_dir):
-                for file in files:
-                    full_path = os.path.join(root_dir, file)
-                    if full_path.endswith(target_suffix):
-                        found_path = full_path
-                        break
-                if found_path:
-                    break
-
-            if not found_path or not os.path.exists(found_path):
-                return f"Error: Local image not found for '{url}'. Assume the alt text needs review."
-
-            with open(found_path, "rb") as f:
-                image_data = f.read()
-
-            mime_type, _ = mimetypes.guess_type(found_path)
-            if not mime_type or not mime_type.startswith("image/"):
-                mime_type = "image/jpeg"
-        else:
-            from app.app_utils.security import validate_public_url
-
-            try:
-                validate_public_url(url)
-            except ValueError as e:
-                return f"Error: {e} Assume the alt text needs manual review."
-            req = urllib.request.Request(url, headers={"User-Agent": "Bondy/1.0"})
-            with urllib.request.urlopen(req, timeout=10) as response:
-                # Cap size to avoid memory exhaustion (10 MB)
-                image_data = response.read(10 * 1024 * 1024)
-                mime_type = response.headers.get_content_type()
-                if not mime_type or not mime_type.startswith("image/"):
-                    mime_type = "image/jpeg"
-
-        client = Client()
-        image_part = types.Part.from_bytes(data=image_data, mime_type=mime_type)
-
-        prompt = (
-            f"Look at this image. The current alt text is '{current_alt}'. "
-            "ANTI-OVER-OPTIMIZATION RULE: If the current alt text is already reasonably accurate, descriptive, "
-            "and captures the core essence of the image, simply reply with: 'The current alt text is good and does not need changes.' "
-            "Do not suggest stylistic improvements or minor additions if the core meaning is already conveyed. "
-            "ONLY describe the image and suggest changes if the current alt text is missing, completely wrong, or overly generic (like 'image' or 'photo')."
-        )
-
-        res = client.models.generate_content(
-            model=os.getenv("BONDY_VISION_MODEL", "gemini-flash-latest"),
-            contents=[image_part, prompt],
-        )
-        return f"Vision Analysis Result: {res.text}"
-    except Exception as e:
-        return f"Error analyzing image: {str(e)}"
 
 
 # ----- Main Accessibility Agent -----
@@ -157,10 +86,24 @@ STEP 1.5 — DETERMINISTIC BASELINE: Call the `axe-accessibility-scanner` skill 
   Then use the checks below to find what axe cannot judge (meaningfulness of alt text, decorative images,
   keyboard traps, focus order). Do not report the same element twice.
 
+STEP 1.7 — VISUAL CHECK: Call `analyze_rendered_page` once (pass source=<the demo path> when you were given a
+  path, or html=<the raw HTML> otherwise) to see the page as a user does. Use what it reports (text inside images,
+  unlabeled icons, unreadable areas) as extra evidence; only report an issue if you can tie it to a concrete
+  element in the HTML source so the "before" string can be copied exactly.
+
 STEP 2 — Audit these WCAG criteria in the HTML:
   - WCAG 1.1.1: <img> tags — are alt attributes meaningful? decorative images should have alt="".
     CRITICAL: For every <img> tag, you MUST use the `verify_image_alt_text` tool to visually verify the image content. NEVER guess the visual content just from the text. 
+    Pass `url` (the src), `current_alt` ('' if missing) and `context_html` (surrounding lines). The tool returns JSON:
+    follow its `recommendation`: "keep" -> do NOT report; "fix" -> report and use its `suggested_alt` (copy it
+    verbatim, never add details it did not state); "needs_manual_review" -> report as severity "warning" and
+    say the description could not be verified with confidence. Never invent visual details (breed, clothing,
+    brand, people) that are not in `visible_content`.
     Also, NEVER start an alt text with redundant phrases like "Image of", "Picture of", "Graphic of", or their Spanish equivalents like "Imagen de" or "Gráfica de". This applies to any language.
+    DECORATIVE CHECK: For every <img>, ALSO call `classify_image_decorative` (pass the exact <img> tag and a few
+    surrounding lines of HTML). If it returns "decorative", the correct fix is alt="" (do not invent a description).
+    If it returns "functional" (image is the only content of a link/button), the alt must describe the action or
+    destination, not the picture.
     IMPORTANT THRESHOLD: If the current alt text is already accurate and descriptive based on the visual verification, DO NOT report it as a failure just to make stylistic improvements (e.g., making it slightly more concise). Only report an issue if the alt text is missing, completely inaccurate, or contains the forbidden redundant phrases.
   - WCAG 1.3.1 / 4.1.2: <input>, <select>, <textarea> — do they have a <label>?
   - WCAG 1.4.3: text color vs background contrast (4.5:1 normal, 3:1 large text).
@@ -211,6 +154,8 @@ Do NOT wrap the JSON in markdown code blocks. Return raw JSON only.
         all_tools,
         read_local_file,
         verify_image_alt_text,
+        classify_image_decorative,
+        analyze_rendered_page,
     ],
 )
 

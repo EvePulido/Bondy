@@ -429,11 +429,19 @@ async function runAudit() {
                                         <pre class="code-box after"><code>${escapeHtml(fix.after)}</code></pre>
                                     </div>
                                 </div>
-                                ${sourceType === 'local_file' ? `
+                                ${sourceType === 'local_file' && fix.before_occurrences === 1 ? `
                                 <button class="btn-apply" onclick="event.stopPropagation(); applyFix(this.closest('.finding-body'), '${escapeHtml(filePath)}', this)">
                                     <span class="material-symbols-outlined" style="font-size: 18px; vertical-align: middle; margin-right: 6px; line-height: 1;">build</span>
                                     Apply to File
                                 </button>
+                                ` : ''}
+                                ${sourceType === 'local_file' && fix.before_occurrences !== undefined && fix.before_occurrences !== 1 ? `
+                                <div class="fix-explanation" role="note" style="margin-top: 12px;">
+                                    <strong>Cannot apply automatically:</strong>
+                                    ${fix.before_occurrences === 0
+                                        ? 'the original snippet was not found exactly in the file. Use Copy and apply it manually.'
+                                        : `the original snippet appears ${fix.before_occurrences} times, so the change would be ambiguous. Use Copy and apply it manually.`}
+                                </div>
                                 ` : ''}
                             </div>
                         </div>

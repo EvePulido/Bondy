@@ -170,6 +170,24 @@ def _build_fallback_app() -> App:
     return App(root_agent=agent, name="app")
 
 
+def _annotate_before_matches(fixes: list[dict], source: str) -> None:
+    """Adds `before_occurrences` to each fix so the UI only offers a safe Apply.
+
+    0 -> the snippet is not in the file (model altered it); 1 -> safe;
+    >1 -> ambiguous, replacing the first match could edit the wrong place.
+    """
+    from app.app_utils.security import get_safe_demo_path
+
+    try:
+        with open(get_safe_demo_path(source), encoding="utf-8") as f:
+            content = f.read()
+    except Exception:
+        return
+    for fix in fixes:
+        before = fix.get("before") or ""
+        fix["before_occurrences"] = content.count(before) if before else 0
+
+
 @app.get("/")
 async def root_ui():
     return FileResponse("web/index.html")
@@ -239,9 +257,12 @@ async def run_audit(req: AuditRequest):
                     )
 
                 source_type = "raw_html" if req.raw_html else "local_file"
+                data = [fix.model_dump() for fix in fixes]
+                if source_type == "local_file":
+                    _annotate_before_matches(data, req.source)
                 return {
                     "status": "success",
-                    "data": [fix.model_dump() for fix in fixes],
+                    "data": data,
                     "stats": axe_stats,
                     "source_type": source_type,
                     "file_path": req.source if not req.raw_html else None,
@@ -323,7 +344,16 @@ async def apply_fix(req: ApplyFixRequest, request: Request):
             with open(safe_path, encoding="utf-8") as f:
                 content = f.read()
 
-            if req.before not in content:
+            occurrences = content.count(req.before) if req.before else 0
+            if occurrences > 1:
+                return JSONResponse(
+                    {
+                        "status": "error",
+                        "message": f"The original code appears {occurrences} times in the file, so the fix is ambiguous. Apply it manually using the Copy button.",
+                    },
+                    status_code=409,
+                )
+            if occurrences == 0:
                 return JSONResponse(
                     {
                         "status": "error",

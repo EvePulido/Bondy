@@ -55,6 +55,9 @@ Unlike traditional tools, Bondy:
 - **Playwright Computed Contrast**: Uses a Playwright Chromium headless instance to render the page and extract exact Computed Styles for foreground/background colors, ensuring deterministic and flawless WCAG 1.4.3 contrast ratio calculations without relying on AI mathematical estimations.
 - **Robust JSON Parsing Engine**: Features a fault-tolerant JSON extraction system capable of parsing clean payloads out of arbitrary markdown code blocks and conversational commentary returned by the model.
 - **Deterministic Skills**: 6 highly specialized, deterministic accessibility skills that execute locally via Playwright (e.g., focus trap detection, HTML lang validation).
+- **Deterministic axe-core Baseline**: Every audit starts with axe-core (WCAG 2.0/2.1/2.2 A/AA) plus Chromium's accessibility tree, and the score shown in the UI is computed from real rule counts.
+- **Grounded Vision Checks**: Alt text is verified against the real image with structured, temperature-0 output and explicit anti-hallucination rules; images are classified as decorative, informative or functional; and a screenshot of the rendered page is analyzed for visual issues.
+- **Safe Auto-Fix**: "Apply to File" is offered only when the original snippet appears exactly once in the file.
 - **Security Guardrails**: Strict input validation to ensure only authorized local environments or raw HTML snippets are scanned.
 - **Enterprise-Ready AI**: Runs robustly using Google Cloud Vertex AI, ensuring high availability and bypassing the limitations of free-tier API keys.
 
@@ -95,6 +98,7 @@ flowchart TD
 | | `text-contrast-calculator` | Playwright Simulation (Computed Styles) | Calculates text contrast mathematically against rendered backgrounds | 1.4.3 (Contrast) |
 | | `interactive-elements-validator`| Deterministic (DOM Parsing) | Identifies empty links or button tags | 2.4.4 / 4.1.2 (Name/Role) |
 | **Baseline** | `axe-accessibility-scanner` | Playwright + axe-core (Accessibility Tree) | Deterministic WCAG 2.x A/AA scan and unnamed-control detection | Multiple (2.0 / 2.1 / 2.2) |
+| **Vision tools** | `verify_image_alt_text`, `classify_image_decorative`, `analyze_rendered_page` | Gemini Multimodal Vision + heuristics | Grounded alt verification, decorative/functional classification, rendered-page screenshot analysis | 1.1.1 / 1.4.x |
 | **Refactoring** | `suggestion-fix-generator` | Gemini Text Refactoring | Generates clean HTML replacement code | N/A |
 
 ## Quick Start
@@ -102,7 +106,7 @@ flowchart TD
 ### 1. Prerequisites
 - Python 3.12+
 - `uv` (Python Package Manager)
-- A Google Cloud Project with Vertex AI enabled.
+- A Gemini API key from [Google AI Studio](https://aistudio.google.com/apikey) (free, no billing needed) **or** a Google Cloud Project with Vertex AI enabled.
 
 ### 2. Installation & Credentials Setup
 1. Clone the repository and sync dependencies:
@@ -115,7 +119,16 @@ flowchart TD
      ```bash
      uv run playwright install --with-deps chromium
      ```
-3. Create a Google Cloud Project (if you don't have one):
+3. **Fastest option — Google AI Studio (no Google Cloud needed):** create an API key at <https://aistudio.google.com/apikey>, copy `.env.example` to `.env` and set:
+   ```env
+   GOOGLE_GENAI_USE_VERTEXAI=False
+   GOOGLE_API_KEY=your-ai-studio-api-key
+   ```
+   Then skip to step 5's "Run" section. The free tier has low quotas: Bondy retries automatically on 429/503 and falls back to a secondary model.
+
+   **Vertex AI option** — follow the next steps if you prefer Google Cloud:
+
+   Create a Google Cloud Project (if you don't have one):
    - Go to the [Google Cloud Console (console.cloud.google.com)](https://console.cloud.google.com/).
    - Create a new project and copy its **Project ID**.
    - Make sure to enable the **Vertex AI API** in the APIs & Services section for that project.
@@ -145,6 +158,14 @@ flowchart TD
      export GOOGLE_GENAI_USE_VERTEXAI="True"
      export GOOGLE_CLOUD_PROJECT="your-google-cloud-project-id"
      ```
+
+#### Optional environment variables
+
+| Variable | Default | Purpose |
+| :--- | :--- | :--- |
+| `BONDY_FALLBACK_MODEL` | `gemini-3.5-flash-lite` | Model used automatically after a 503 from the primary model. Empty disables it. |
+| `BONDY_VISION_MODEL` | `gemini-flash-latest` | Model for the vision tools (alt text, decorative images, page screenshot). |
+| `BONDY_API_KEY` | _unset_ | If set, `POST /api/apply-fix` requires an `X-API-Key` header. If unset, only localhost can write files. |
 
 ### 3. Run the API and Web UI Locally
 Launch the built-in FastAPI server to access the Bondy Web UI:
@@ -200,7 +221,11 @@ Validate agent configurations, types, and manifests:
 
 ## Security
 
-All tools strictly adhere to the project's security rules (`AGENTS.md`), preventing directory traversal outside of the `ALLOWED_SOURCES` and restricting browser navigation.
+All tools follow the project's security rules (`.agents/AGENTS.md`):
+
+- **Path guardrail:** only files inside `demo_sites/` or raw HTML are audited; traversal and absolute paths are rejected (`app/app_utils/security.py`).
+- **SSRF guard:** remote image/page URLs must resolve to public IPs; loopback, private and metadata addresses are blocked (`validate_public_url`). The axe scanner aborts every non-local network request made by the audited page.
+- **Write protection:** `POST /api/apply-fix` accepts only localhost, or a valid `X-API-Key` when `BONDY_API_KEY` is set, and refuses ambiguous replacements.
 
 ## Contributors
 
