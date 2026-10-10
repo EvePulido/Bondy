@@ -99,8 +99,8 @@ Estado en la rama `refactor/package-bondy` (sin commitear).
 |---|---|---|---|
 | A1 | Renombrar `app/` → `bondy/`; recursos a `bondy/resources/` con `importlib.resources`. | **Hecho** | `git mv`; el wheel contiene `resources/` (verificado). Subpaquete `app_utils` se mantiene (renombrado mecánico). Nombre de la `App` ADK y `app_name` pasan de `"app"` a `"bondy"` (rutas `/apps/bondy/...`). `git-commit-formatter` salió del proyecto y quedó como skill global en `~/.claude/skills/` (no forma parte del runtime). `demo_sites/` **no** se renombró a `examples/` (lo referencian `ALLOWED_SOURCES`, tests y `security.py`; se hará con D1). `.gitignore` tenía `Bondy/`, que git (insensible a mayúsculas en Windows/macOS) aplicaba también al paquete `bondy/`: se corrigió para que los archivos nuevos no queden ignorados. `bondy --version` funciona (ver A3); `pip install .` en venv limpio: imports y recursos OK; el escaneo con navegador quedó verificado en A6 (cierre de la Fase A). |
 | A2 | Dependencias por extras. | **Hecho** | Núcleo: `playwright`, `google-genai`, `pydantic` (no hizo falta `beautifulsoup4`/`lxml`). Extras `server`, `agent`, `gcp`, `mcp` (+ `eval`, `lint` existentes). El grupo `dev` incluye `bondy[server,agent]`. Telemetría apagada por defecto (documentado en README). `bondy/__init__.py` ya no importa ADK (`__getattr__` perezoso). Regla 3 de AGENTS.md actualizada. Pendiente: el servidor web aún requiere `agent` (usa ADK); desacoplarlo es parte de B2. |
-| A3 | CLI: `scan`, `fix`, `serve`, `estimate`, `doctor`. | **Parcial (MVP)** | Hecho: `bondy scan <archivo\|carpeta> [--no-llm] [--format terminal\|json] [--fail-on] [--checks] [--include/--exclude] [--config]` con códigos de salida 0/1/2, y `python -m bondy`. Pendiente: `fix`, `serve`, `estimate`, URLs, y que `scan` sin `--no-llm` use el LLM (hoy avisa y corre solo lo determinista). Sin browser compartido ni paralelismo (cada escáner abre su Chromium; Fase B). |
-| A4 | Configuración `bondy.toml` + env + flags. | **Hecho** | `bondy/config.py`; precedencia flag > env > archivo > default, con tests. La API key **no** se acepta en `bondy.toml`. `GEMINI_API_KEY` precede a `GOOGLE_API_KEY`. Pendiente: que `vision_tools.py`/`agent.py`/`fast_api_app.py` lean de `Settings` (hoy siguen leyendo `BONDY_VISION_MODEL`/`BONDY_FALLBACK_MODEL` directamente, con los mismos defaults) y pasar la key explícita al `Client` (el SDK da prioridad a `GOOGLE_API_KEY`). Presupuesto (`budget`) llega con B6. |
+| A3 | CLI: `scan`, `fix`, `serve`, `estimate`, `doctor`. | **Parcial (MVP)** | Hecho: `bondy scan <archivo\|carpeta> [--no-llm] [--format terminal\|json] [--fail-on] [--checks] [--include/--exclude] [--config]` con códigos de salida 0/1/2, y `python -m bondy`. Pendiente: `fix`, `serve`, URLs. `estimate` y `scan` con el LLM llegaron en la Fase B, entrega 1. Sin browser compartido ni paralelismo (cada escáner abre su Chromium; Fase B). |
+| A4 | Configuración `bondy.toml` + env + flags. | **Hecho** | `bondy/config.py`; precedencia flag > env > archivo > default, con tests. La API key **no** se acepta en `bondy.toml`. `GEMINI_API_KEY` precede a `GOOGLE_API_KEY`. **Parcial tras la Fase B/entrega 1**: el pipeline nuevo (`bondy/core/providers/gemini.py`) lee `Settings` (modelo, `vision_model`, `fallback_model`) y pasa la key explícita al `Client`. Pendiente: `vision_tools.py`/`agent.py`/`fast_api_app.py` (modo agente y UI) siguen leyendo `BONDY_VISION_MODEL`/`BONDY_FALLBACK_MODEL` y usando `Client()` sin key explícita. Presupuesto añadido en B6 (`max_*`, `price_*`, `batch_size`, `tokens_per_image`). |
 | A5 | `bondy doctor`. | **Parcial** | Hecho (offline): Python, paquete/binario de Chromium, axe-core, `bondy.toml`, key presente (nunca se imprime), permiso de escritura; cada fallo da el comando. Pendiente: validar la key con 1 petición real (consume cuota; no se implementó a propósito). |
 | A6 | Navegador del sistema / modo estático. | **Hecho** | `bondy/app_utils/browser.py::launch_with_label` es el único lanzador: Chromium de Playwright, luego `channel="chrome"`, `channel="msedge"` y por último el ejecutable de Chrome/Edge encontrado en disco (`executable_path`; añadido porque en Linux `channel=chrome` solo mira `/opt/google/chrome`). Si nada arranca lanza `BrowserUnavailableError` con el comando exacto (`python -m playwright install chromium`). Lo usan los 4 escáneres Playwright, `render_page.py` y `doctor` (que ahora lanza el navegador de verdad y dice cuál se usará). **Modo estático**: si no hay navegador, `bondy scan` no falla; omite `axe`, `contrast`, `focus-trap` y `focus-order`, ejecuta `lang`, `labels`, `accessible-name` y un `img-alt` por regex (sustituto parcial de la regla `image-alt` de axe), lo declara en `notes` (`static_mode: true` y `omitted_checks` por archivo en JSON) y sale con 0/1; un error real de un escáner sigue dando 2. Verificado con el wheel en un venv limpio: ver hallazgos. |
 
@@ -116,16 +116,67 @@ Estado en la rama `refactor/package-bondy` (sin commitear).
 
 | # | Tarea | Esfuerzo | Criterio |
 |---|---|---|---|
-| B1 | **Modo `--no-llm`** (axe + skills deterministas). Es el valor base sin key. | S | Salida completa sin red. |
-| B2 | **Pipeline por código** (ver D1): sin turnos de agente para escáneres; prompts cortos. | L | ≤2 peticiones por página típica. |
-| B3 | **Lotes de imágenes**: N imágenes por petición con esquema JSON de salida; fusionar `verify` + `classify`. | M | Misma decisión (`keep`/`fix`/`needs_manual_review`) que hoy en los 3 demos (tests golden). |
-| B4 | **Caché** `.bondy/cache` por hash(imagen + alt + modelo + versión de prompt). Invalidación al cambiar prompt/modelo. | M | Segundo escaneo = 0 peticiones. |
-| B5 | `bondy estimate`: cuenta imágenes/páginas/tokens y muestra **rango de costo** con precios configurables antes de gastar; `--dry-run`. | M | Muestra "N peticiones, ~X tokens, ~$Y". |
-| B6 | **Topes duros**: `--max-requests`, `--max-usd`, `--max-pages`, `--max-images`; al llegar al tope, se detiene y entrega parcial. | S | Test que fuerza el tope. |
+| B1 | **Modo `--no-llm`** (axe + skills deterministas). Es el valor base sin key. | S | Salida completa sin red. **Hecho** (fase A). |
+| B2 | **Pipeline por código** (ver D1): sin turnos de agente para escáneres; prompts cortos. | L | ≤2 peticiones por página típica. **Hecho (entrega 1)**: `bondy/core/` (ver "Cierre de la Fase B, entrega 1"). `bondy scan` sin `--no-llm` usa el pipeline; sin key cae a `--no-llm` con aviso. La interfaz `LLMProvider` + `GeminiProvider` + `FakeProvider` (D2) también está hecha. |
+| B3 | **Lotes de imágenes**: N imágenes por petición con esquema JSON de salida; fusionar `verify` + `classify`. | M | Misma decisión (`keep`/`fix`/`needs_manual_review`) que hoy en los 3 demos (tests golden). **Hecho (entrega 1)**: lotes de `batch_size` (def. 8), una llamada fusionada, dedup por (src, alt), plantillas deterministas, 1 reintento por JSON inválido. El "golden" se hizo como **paridad con `decide_alt_recommendation`** (rejilla alt x match x confianza) y no contra Gemini real (sin cuota): ver hallazgos. |
+| B4 | **Caché** `.bondy/cache` por hash(imagen + alt + modelo + versión de prompt). Invalidación al cambiar prompt/modelo. | M | Segundo escaneo = 0 peticiones. **Pendiente** (solo existe `PROMPT_VERSION` en `semantic.py` como futura parte de la clave). |
+| B5 | `bondy estimate`: cuenta imágenes/páginas/tokens y muestra **rango de costo** con precios configurables antes de gastar; `--dry-run`. | M | Muestra "N peticiones, ~X tokens, ~$Y". **Hecho (entrega 1)**: `bondy estimate <ruta>` y `bondy scan --dry-run` (`bondy/core/estimate.py`); no llama al modelo ni descarga imágenes remotas. Es una estimación (caracteres/4 + `tokens_per_image`); no hay precios por defecto: sin configurarlos el costo en dólares figura como no disponible. |
+| B6 | **Topes duros**: `--max-requests`, `--max-usd`, `--max-pages`, `--max-images`; al llegar al tope, se detiene y entrega parcial. | S | Test que fuerza el tope. **Hecho (entrega 1)**: resultado PARCIAL con motivo y código de salida 3 (ver hallazgos). `--max-requests` cuenta también los reintentos internos (429). |
 | B7 | **Escalado de modelo**: barato por defecto, caro solo si baja la confianza; configurable. | S | Métrica de cuántas escalan. |
 | B8 | **Batch API opcional** (`--batch`, -50%, hasta 24 h) para repos grandes/CI nocturno; con `bondy fetch <job>`. | L | Job reanudable. |
 | B9 | **Escaneo incremental**: solo archivos cambiados (hash o `git diff`). | M | Re-escaneo sin cambios = 0 peticiones. |
 | B10 | Gestión de cuotas: distinguir 429 por minuto (esperar `retryDelay`) y por día (parar y decirlo), con resultados parciales y reanudación (`--resume`). | M | Sin reinicios completos. |
+
+### Cierre de la Fase B, entrega 1 (B2, B3, B5, B6 + `LLMProvider`)
+
+Rama `feat/pipeline-no-llm` (sin commitear). Estado: 183 tests unitarios pasan, `ruff check .` limpio (tras aplicar las decisiones del usuario de abajo). **Nada se verificó contra Gemini real** (cuota diaria agotada): todos los tests usan `FakeProvider`/mocks.
+
+**Qué se construyó** (`bondy/core/`, sin FastAPI ni ADK)
+
+| Módulo | Responsabilidad |
+|---|---|
+| `checks.py` | Fuente única de qué checks existen y su mapeo WCAG; `scan.py` y `fast_api_app.py` (instrucción "audita todo") leen de aquí. |
+| `models.py` | Contratos entre etapas (dataclasses): `ImageOccurrence`, `ImageOutcome`, `ImageFix`, `UsageSummary`, `ScanReport`. |
+| `images.py` | Extrae `<img>` (con contexto del enlace/botón que lo contiene), carga imágenes con contención en la raíz del proyecto, tope de 10 MB, detección de formato por bytes (no por extensión) y razones accionables. |
+| `providers/` | `LLMProvider` (interfaz), `RetryingProvider` (política única de reintentos), `GeminiProvider` (`google-genai`, key explícita, redactada en errores), `FakeProvider` (429 minuto/día, 503, JSON inválido, timeout). |
+| `semantic.py` | Triage determinista, lotes (por cantidad y por bytes), prompt con datos delimitados, validación por esquema, un reintento correctivo, decisión final en código. |
+| `fixes.py` | Plantillas: `alt=""` decorativa, prefijo redundante, inserción/sustitución de `alt` en la etiqueta. |
+| `budget.py` | `Pricing`, `Limits`, `UsageTracker` (peticiones HTTP reales, tokens reportados o estimados, costo). |
+| `estimate.py` | `bondy estimate` / `--dry-run`. |
+| `pipeline.py` | `run_scan`: escáneres -> etapa semántica -> fixes -> reporte; `exit_code`. |
+
+**Medición de peticiones por página (proveedor simulado, NO Gemini real)**
+
+| Sitio demo | Páginas | Imágenes | Peticiones antes (*) | Peticiones después (FakeProvider) |
+|---|---|---|---|---|
+| `site_1_bad_alt` | 1 | 2 | ~12 (medido en la Fase A con Gemini real) | 1 |
+| `site_2_focus_trap` | 1 | 0 | 0 de visión | 0 |
+| `site_3_mixed_errors` | 1 | 0 | 0 de visión | 0 |
+| `retrodiner` | 1 | 7 | >=14 (2 herramientas por imagen; sin contar turnos del agente; **no medido**) | 1 |
+| `demo_sites/` completo | 4 | 9 | n/d | 2 (un lote de 8 + uno de 1; el lote cruza páginas) |
+
+(*) "Antes" es el agente ADK: cada `<img>` dispara `verify_image_alt_text` y `classify_image_decorative` (2 peticiones) más los turnos del agente. Solo el dato de `site_1` fue medido (Fase A); el resto es el mínimo teórico del diseño anterior. "Después" cuenta peticiones HTTP del `FakeProvider`; con Gemini real puede haber reintentos por 429/503 o por JSON inválido (hasta 2x por lote).
+
+**Decisiones de diseño tomadas (revisables)**
+
+- **Código de salida 3 = resultado parcial** (**aceptado por el usuario**; tope o cuota alcanzados) cuando no hay hallazgos al umbral; si hay hallazgos al umbral sigue siendo 1; con `--fail-on never` un parcial sale 0; los errores (2) siguen teniendo prioridad. Motivo: 2 ya significa "uso/configuración o escáner falló" y un parcial no es ninguna de las dos cosas.
+- **Topes: 0/vacío = sin límite.** Decisión del usuario: `max_requests` vale **50 por defecto** (el resto sin límite); el resumen indica cuándo el tope en vigor es el valor por defecto y el aviso explica cómo subirlo (`--max-requests N` / `0`).
+- **`--max-images` cuenta imágenes únicas que irían al modelo**; las resueltas por plantilla no cuentan (son gratis).
+- **`--max-requests` cuenta peticiones HTTP**, reintentos por 429 incluidos (el proveedor recibe `max_attempts`); `--max-usd` se evalúa **antes** de cada lote con una estimación (precio configurado) y después con tokens reales si el proveedor los reporta.
+- Con la key ausente y sin `--no-llm`: aviso explícito y ejecución determinista (`mode: no-llm`).
+- Cuota diaria (`PerDay`) en todos los modelos: se detiene, las imágenes pendientes quedan `skipped` (no "revisión manual") y el resultado es parcial. Dos lotes seguidos fallidos por otra causa (503/timeout) también detienen el escaneo.
+- Los hallazgos semánticos son `scanner: "alt-text"`, severidad `critical` si falta/está vacío el alt de una imagen informativa o funcional, o no coincide con la imagen; `warning` para decorativas, prefijos y revisión manual. Los `image-alt` de axe/estático ya cubiertos se retiran por coincidencia de `src` (heurística).
+
+**Hallazgos / pendientes**
+
+- **Imágenes remotas (decisión del usuario)**: `images.py` **descarga imágenes http(s) públicas por defecto** (host validado con `validate_public_url`, cada redirección revalidada; sin protección contra DNS rebinding), como ya hacía `vision_tools._load_image`. Solo hay opt-out: `--no-remote-images` / `remote_images = false` / `BONDY_REMOTE_IMAGES`; con él esas imágenes van a `needs_manual_review` con motivo accionable y `estimate`/`--dry-run` lo reflejan. La contención de rutas locales no cambia.
+- **Sin verificar con Gemini real**: que `response_schema=BatchAnalysis` (modelo anidado con lista) sea aceptado tal cual; `HttpOptions(timeout=60000)` (ms); el tope de ~20 MB por petición con imágenes inline (se usa 15 MB conservador, `MAX_BATCH_BYTES`); que GIF no sea soportado (se trata como no soportado junto con SVG/AVIF); los tokens por imagen (`tokens_per_image=1100` es un marcador).
+- **Precios (decisión del usuario, opción B)**: `price_input_per_mtok`/`price_output_per_mtok` no tienen valores por defecto (`None`). Sin ellos `estimate`, `--dry-run` y el resumen muestran peticiones y tokens y declaran el costo no disponible (JSON: `cost_usd: null` + `cost_unavailable_reason`); `--max-usd` sin precios falla con código 2 antes de llamar al modelo. `tokens_per_image=1100` sigue siendo un marcador de estimación.
+- **Acoplamiento**: `bondy/core/` importa de `bondy/app_utils/vision_tools.py` (reglas de grounding, heurísticas, `_quota_retry_delay`) para no duplicar lógica; ese módulo lee `BONDY_VISION_MODEL` a nivel de módulo. Conviene mover esas piezas a `core` cuando se retire el modo agente.
+- **`web/app.js`** tiene su propio mapeo checks->WCAG: no se unificó (cambios a la UI fuera de alcance).
+- **La UI web y `/api/audit` siguen usando el agente ADK**; migrarlos al pipeline queda para una entrega posterior.
+- **Calidad del alt "funcional"**: depende de que el modelo siga la regla "describe el destino, no la imagen"; no se puede verificar sin llamadas reales.
+- **No empezado (fuera de alcance)**: B4 (caché), B7, B8, B9, B10, validación real de la key, timeouts globales/navegador compartido (siguiente entrega).
 
 ### Fase C — Casos extremos y robustez (P0/P1)
 

@@ -189,9 +189,23 @@ bondy scan ./my-site --no-llm             # deterministic scanners on a file or 
 bondy scan page.html --format json --fail-on warning
 ```
 
-`bondy scan` runs axe-core, contrast, keyboard focus (trap/order), `lang`, form labels and accessible-name checks. Exit code: `0` nothing at/above `--fail-on` (default `critical`), `1` findings at/above it, `2` usage/config error or a scanner failed (incomplete result). The LLM pipeline (alt-text quality, decorative images) is not wired into the CLI yet, so `scan` always runs deterministic checks only.
+`bondy scan` runs axe-core, contrast, keyboard focus (trap/order), `lang`, form labels and accessible-name checks. Without `--no-llm` and **with an API key** (`GEMINI_API_KEY` or `GOOGLE_API_KEY`) it also runs a semantic stage on `<img>` elements: code triages first (decorative signals, redundant "image of" prefixes, images that cannot be loaded) and only the rest goes to Gemini, **several images per request** (`--batch-size`, default 8), with one fused call that judges the alt text and the decorative/informative/functional class. The final keep/fix/manual-review decision is made in code. Without a key it falls back to `--no-llm` and says so.
 
-**Configuration precedence: flag > environment variable > `bondy.toml` > default.** `bondy.toml` is searched upward from the current directory (or pass `--config`). Keys: `model`, `vision_model`, `fallback_model`, `no_llm`, `format` (`terminal`|`json`), `fail_on` (`critical`|`warning`|`never`), `checks`, `include`, `exclude`. Each key has an environment variable (`BONDY_MODEL`, `BONDY_VISION_MODEL`, `BONDY_FALLBACK_MODEL`, `BONDY_NO_LLM`, `BONDY_FORMAT`, `BONDY_FAIL_ON`, `BONDY_CHECKS`, `BONDY_INCLUDE`, `BONDY_EXCLUDE`; lists are comma-separated).
+Exit code: `0` nothing at/above `--fail-on` (default `critical`), `1` findings at/above it, `2` usage/config error or a scanner failed (incomplete result), `3` **partial** result (a limit or the API quota stopped the scan and nothing at/above the threshold was found).
+
+```bash
+bondy estimate ./my-site                  # requests / tokens / cost estimate; calls no model
+bondy scan ./my-site --dry-run            # same estimate, runs nothing
+bondy scan ./my-site --max-requests 20 --max-usd 0.50 --max-pages 50 --max-images 100
+```
+
+Hard limits (`--max-requests`, `--max-usd`, `--max-pages`, `--max-images`; also `bondy.toml`/`BONDY_MAX_*`) stop the scan and print a PARTIAL RESULT with the reason. `--max-requests` counts HTTP requests to the model, retries included, and has a **default of 50**; `0` means no limit (the summary says when the cap in force is the default and how to change it). The other limits are unlimited unless set. At the end of every LLM scan Bondy prints what it used: requests, batches, images verified/skipped, tokens (when the provider reports them) and an **estimated** cost.
+
+**Prices are never assumed.** Bondy ships no price values: set `price_input_per_mtok` and `price_output_per_mtok` (USD per million tokens, from your provider's price list) in `bondy.toml` or `BONDY_PRICE_INPUT_PER_MTOK` / `BONDY_PRICE_OUTPUT_PER_MTOK`. Without them `estimate`, `--dry-run` and the usage summary show requests and tokens and say the dollar cost is not available (JSON: `cost_usd: null` plus `cost_unavailable_reason`). `--max-usd` needs prices: without them the command fails with exit code 2 before calling the model. `estimate` is an approximation (characters/4 plus `tokens_per_image`), not a quote.
+
+Images in the HTML are sent to the provider: local files inside the project root, and public http(s) images, which Bondy downloads (public hosts only, redirects re-checked). Use `--no-remote-images` (`remote_images = false`, `BONDY_REMOTE_IMAGES=0`) to skip downloading remote images; they then go to manual review. The free tier of the Gemini API may use content to improve Google products.
+
+**Configuration precedence: flag > environment variable > `bondy.toml` > default.** `bondy.toml` is searched upward from the current directory (or pass `--config`). Keys: `model`, `vision_model`, `fallback_model`, `no_llm`, `static`, `format` (`terminal`|`json`), `fail_on` (`critical`|`warning`|`never`), `checks`, `include`, `exclude`, `batch_size`, `max_requests`, `max_usd`, `max_pages`, `max_images`, `price_input_per_mtok`, `price_output_per_mtok`, `tokens_per_image`, `remote_images`. Each key has an environment variable (`BONDY_MODEL`, `BONDY_VISION_MODEL`, `BONDY_FALLBACK_MODEL`, `BONDY_NO_LLM`, `BONDY_FORMAT`, `BONDY_FAIL_ON`, `BONDY_CHECKS`, `BONDY_INCLUDE`, `BONDY_EXCLUDE`, `BONDY_BATCH_SIZE`, `BONDY_MAX_REQUESTS`, `BONDY_MAX_USD`, `BONDY_MAX_PAGES`, `BONDY_MAX_IMAGES`, `BONDY_PRICE_INPUT_PER_MTOK`, `BONDY_PRICE_OUTPUT_PER_MTOK`, `BONDY_TOKENS_PER_IMAGE`, `BONDY_REMOTE_IMAGES`; lists are comma-separated).
 
 ```toml
 # bondy.toml

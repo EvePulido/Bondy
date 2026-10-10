@@ -26,7 +26,21 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 - `tests/unit/test_latency_controls.py`, `test_config.py`, `test_cli_scan.py`, `test_doctor.py`.
 - `docs/improvement-plan.md`: plan v2 (herramienta local, portable y con la API key del propio desarrollador).
 
+- `bondy/core/` (sin FastAPI ni ADK): pipeline por código `escáneres -> etapa semántica de imágenes -> fixes -> reporte` (`run_scan`). `bondy scan` sin `--no-llm` y con API key lo usa; sin key avisa y corre solo lo determinista.
+- `LLMProvider` mínima (`bondy/core/providers/`): `GeminiProvider` (`google-genai`, modelos desde `Settings`, key explícita y redactada de los errores), política de reintentos única (429 por minuto espera, `PerDay` no se reintenta, modelo de respaldo) y `FakeProvider` para tests (429 minuto/día, 503, JSON inválido, timeout).
+- Etapa semántica por lotes: una llamada por `batch_size` imágenes (def. 8) que fusiona verify+classify con esquema JSON; dedup por (src, alt); triage determinista (decorativas, prefijo redundante); imágenes no cargables (404, no imagen, enorme, formato no soportado, `data:`, fuera de la raíz) -> `needs_manual_review` con motivo; un reintento si el JSON es inválido; la decisión final sigue en código.
+- Topes duros `--max-requests`, `--max-usd`, `--max-pages`, `--max-images` (flag > env `BONDY_MAX_*` > `bondy.toml`; 0 = sin límite): resultado PARCIAL con motivo y código de salida 3. `max_requests` vale **50 por defecto**; al alcanzarlo el aviso dice que es el valor por defecto y cómo subirlo (`--max-requests N` / `0`).
+- `--no-remote-images` (`remote_images`, `BONDY_REMOTE_IMAGES`): opt-out de la descarga de imágenes http(s); por defecto se descargan (hosts públicos). Con el opt-out van a `needs_manual_review` con el motivo.
+- `bondy estimate <ruta>` y `bondy scan --dry-run`: rango de peticiones, tokens y costo sin llamar al modelo; precios configurables (`price_input_per_mtok`, `price_output_per_mtok`, **sin valores por defecto**): sin precios se muestran peticiones y tokens y el costo figura como no disponible (`cost_usd: null` + `cost_unavailable_reason`); `--max-usd` sin precios termina con código 2 antes de llamar al modelo.
+- Resumen de uso al final de `scan` (y en JSON: `usage`, `fixes`): peticiones, lotes, imágenes verificadas/resueltas en código/omitidas, tokens y costo estimado, resultado parcial.
+- Nuevas claves de configuración: `batch_size`, `max_requests`, `max_usd`, `max_pages`, `max_images`, `price_input_per_mtok`, `price_output_per_mtok`, `tokens_per_image`, `remote_images`.
+- `bondy/core/checks.py`: fuente única de checks y mapeo WCAG.
+- Tests `test_pipeline.py`, `test_providers.py`, `test_semantic.py`, `test_limits.py`, `test_estimate.py` (sin red ni cuota).
+
 ### Changed
+- `bondy scan` devuelve 3 cuando el resultado es parcial y no hay hallazgos al umbral de `--fail-on`.
+- `scan.py`: el mapeo WCAG de cada escáner sale de `bondy/core/checks.py`; `scan_path` acepta `max_files`. `fast_api_app.py` toma la lista "auditar todo" de la misma fuente.
+- Regla 3 de `.agents/AGENTS.md`: el pipeline por código es el predeterminado (D1); el agente ADK es el modo opcional.
 - `contrast.py`, `focus_trap.py` y `focus_order.py` ya no navegan a contenido que empieza por `http(s)://` ni cargan recursos remotos (antes no tenían bloqueo de red); `axe_scan.py` ya no permite `file:` ajenos. `render_page.py` usa el mismo guard (mantiene los hosts públicos verificados).
 - `/api/apply-fix` rechaza con 409 los reemplazos ambiguos (el `before` aparece más de una vez).
 - `.env.example` y README: opción gratuita con API key de AI Studio, variables `BONDY_*`, descripción de seguridad actualizada.
