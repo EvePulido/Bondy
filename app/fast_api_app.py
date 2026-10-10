@@ -21,16 +21,19 @@ AGENT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 load_dotenv(dotenv_path=os.path.join(AGENT_DIR, ".env"), override=True)
 
 import google.auth
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from google.adk.apps import App
 from google.adk.cli.fast_api import get_fast_api_app
+from google.adk.models import Gemini
 from google.adk.runners import InMemoryRunner
 from google.cloud import logging as google_cloud_logging
 from google.genai import types
 from pydantic import BaseModel
 
 from app.agent import app as adk_app
+from app.app_utils.audit_schema import parse_audit_response
 from app.app_utils.security import validate_input_before_audit
 from app.app_utils.telemetry import setup_telemetry
 from app.app_utils.typing import Feedback
@@ -116,6 +119,57 @@ class ApplyFixRequest(BaseModel):
     after: str
 
 
+_AXE_SCRIPT = (
+    os.path.join(AGENT_DIR, ".agents", "skills", "axe-accessibility-scanner")
+    + os.sep
+    + "scripts"
+    + os.sep
+    + "axe_scan.py"
+)
+
+
+def _compute_axe_stats(raw_html: str | None, source: str) -> dict | None:
+    """Runs the deterministic axe baseline and returns real rule counts.
+
+    Returns None if the scan cannot run (e.g. Chromium missing), so the UI can
+    fall back gracefully instead of failing the whole audit.
+    """
+    import importlib.util
+
+    try:
+        if raw_html is None:
+            from app.app_utils.security import get_safe_demo_path
+
+            with open(get_safe_demo_path(source), encoding="utf-8") as f:
+                raw_html = f.read()
+
+        spec = importlib.util.spec_from_file_location("bondy_axe_scan", _AXE_SCRIPT)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        report = module.scan(raw_html)
+        summary = report["summary"]
+        return {
+            "passes": summary["passes"],
+            "violations": summary["violations"],
+            "needs_review": summary["needs_review"],
+        }
+    except Exception as e:
+        logger.warning(f"axe baseline unavailable: {e}")
+        return None
+
+
+# Backup model used when the primary one is overloaded (503). Empty string disables it.
+FALLBACK_MODEL = os.getenv("BONDY_FALLBACK_MODEL", "gemini-3.5-flash-lite")
+
+
+def _build_fallback_app() -> App:
+    """Same agent and tools, running on the backup model."""
+    agent = adk_app.root_agent.model_copy(
+        update={"model": Gemini(model=FALLBACK_MODEL)}
+    )
+    return App(root_agent=agent, name="app")
+
+
 @app.get("/")
 async def root_ui():
     return FileResponse("web/index.html")
@@ -128,10 +182,16 @@ async def run_audit(req: AuditRequest):
     except ValueError as e:
         return JSONResponse({"status": "error", "message": str(e)}, status_code=403)
 
-    max_retries = 3
+    # Real, deterministic rule counts (computed once, outside the LLM retry loop)
+    axe_stats = await asyncio.to_thread(_compute_axe_stats, req.raw_html, req.source)
+
+    max_retries = 4
+    use_fallback = False
     for attempt in range(max_retries):
         try:
-            runner = InMemoryRunner(app=adk_app)
+            runner = InMemoryRunner(
+                app=_build_fallback_app() if use_fallback else adk_app
+            )
             session = await runner.session_service.create_session(
                 app_name="app", user_id="web_user"
             )
@@ -152,10 +212,8 @@ async def run_audit(req: AuditRequest):
                 prompt = (
                     f"Run a full accessibility audit on the demo site at: {req.source}\n"
                     f"Call read_local_file(file_path='{req.source}') to read the HTML, "
-                    f"then audit the following criteria: {extra_instruction} and return a FixesReport with all the fixes."
+                    f"then audit the following criteria: {extra_instruction} and return the JSON array of fixes."
                 )
-
-            import json as _json
 
             last_text = None
             async for event in runner.run_async(
@@ -172,64 +230,22 @@ async def run_audit(req: AuditRequest):
                             last_text = part.text
 
             if last_text:
-                import re
-
-                def extract_json_data(text: str):
-                    clean = text.strip()
-                    try:
-                        return _json.loads(clean)
-                    except _json.JSONDecodeError:
-                        pass
-
-                    # Try finding markdown code block: ```json ... ``` or ``` ... ```
-                    pattern = re.compile(r"```(?:json)?\s*([\s\S]*?)\s*```")
-                    matches = pattern.findall(text)
-                    for match in matches:
-                        try:
-                            return _json.loads(match.strip())
-                        except _json.JSONDecodeError:
-                            pass
-
-                    # Try finding outer bounds of JSON array or object
-                    arr_start = text.find("[")
-                    arr_end = text.rfind("]")
-                    obj_start = text.find("{")
-                    obj_end = text.rfind("}")
-
-                    if (
-                        arr_start != -1
-                        and arr_end != -1
-                        and (obj_start == -1 or arr_start < obj_start)
-                    ):
-                        try:
-                            return _json.loads(text[arr_start : arr_end + 1])
-                        except _json.JSONDecodeError:
-                            pass
-
-                    if obj_start != -1 and obj_end != -1:
-                        try:
-                            return _json.loads(text[obj_start : obj_end + 1])
-                        except _json.JSONDecodeError:
-                            pass
-
-                    raise ValueError(
-                        "The AI failed to format its response as a valid JSON array. Recovery: Please click 'Run accessibility audit' again to let the AI try generating the correct format."
+                try:
+                    fixes = parse_audit_response(last_text)
+                except ValueError as parse_err:
+                    return JSONResponse(
+                        {"status": "error", "message": str(parse_err)},
+                        status_code=500,
                     )
 
-                try:
-                    result = extract_json_data(last_text)
-                    if isinstance(result, dict) and "fixes" in result:
-                        result = result["fixes"]
-
-                    source_type = "raw_html" if req.raw_html else "local_file"
-                    return {
-                        "status": "success",
-                        "data": result,
-                        "source_type": source_type,
-                        "file_path": req.source if not req.raw_html else None,
-                    }
-                except Exception:
-                    pass
+                source_type = "raw_html" if req.raw_html else "local_file"
+                return {
+                    "status": "success",
+                    "data": [fix.model_dump() for fix in fixes],
+                    "stats": axe_stats,
+                    "source_type": source_type,
+                    "file_path": req.source if not req.raw_html else None,
+                }
 
             return JSONResponse(
                 {
@@ -241,11 +257,14 @@ async def run_audit(req: AuditRequest):
 
         except Exception as e:
             err_msg = str(e)
-            if "429" in err_msg or "RESOURCE_EXHAUSTED" in err_msg:
+            is_rate_limit = "429" in err_msg or "RESOURCE_EXHAUSTED" in err_msg
+            is_overloaded = "503" in err_msg or "UNAVAILABLE" in err_msg
+            if is_rate_limit or is_overloaded:
                 if attempt < max_retries - 1:
                     import re
 
-                    wait_sec = 5.0
+                    # Exponential backoff for transient overload: 5s, 10s, 20s
+                    wait_sec = 5.0 * (2**attempt)
                     match = re.search(r"retry in (\d+\.?\d*)s", err_msg)
                     if match:
                         wait_sec = float(match.group(1)) + 1.0
@@ -254,14 +273,15 @@ async def run_audit(req: AuditRequest):
                         if match_delay:
                             wait_sec = float(match_delay.group(1)) + 1.0
 
-                    try:
-                        logger.warning(
-                            f"Rate limit hit (429). Retrying in {wait_sec} seconds... (Attempt {attempt + 1}/{max_retries})"
-                        )
-                    except Exception:
-                        print(
-                            f"Rate limit hit (429). Retrying in {wait_sec} seconds... (Attempt {attempt + 1}/{max_retries})"
-                        )
+                    reason = "Rate limit (429)" if is_rate_limit else "Model overloaded (503)"
+                    if is_overloaded and FALLBACK_MODEL and not use_fallback:
+                        # Same model keeps failing: switch to the backup model
+                        use_fallback = True
+                        wait_sec = min(wait_sec, 3.0)
+                        reason += f" - switching to fallback model '{FALLBACK_MODEL}'"
+                    logger.warning(
+                        f"{reason}. Retrying in {wait_sec} seconds... (Attempt {attempt + 1}/{max_retries})"
+                    )
 
                     await asyncio.sleep(wait_sec)
                     continue
@@ -277,8 +297,24 @@ file_locks = defaultdict(asyncio.Lock)
 
 
 @app.post("/api/apply-fix")
-async def apply_fix(req: ApplyFixRequest):
+async def apply_fix(req: ApplyFixRequest, request: Request):
     from app.app_utils.security import get_safe_demo_path
+
+    # This endpoint writes to disk: require an API key if configured,
+    # otherwise only accept requests coming from the local machine.
+    api_key = os.getenv("BONDY_API_KEY")
+    if api_key:
+        authorized = request.headers.get("x-api-key") == api_key
+    else:
+        authorized = request.client is not None and request.client.host in (
+            "127.0.0.1",
+            "::1",
+            "localhost",
+        )
+    if not authorized:
+        return JSONResponse(
+            {"status": "error", "message": "Unauthorized."}, status_code=403
+        )
 
     try:
         safe_path = get_safe_demo_path(req.file_path)

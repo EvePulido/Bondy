@@ -63,20 +63,12 @@ Instead of separate agents, the single agent has access to these deterministic a
 ### Common Data Contract Specifications
 
 ```yaml
-Finding:
-  id: string (uuid)
-  skill: string
-  wcag_criterion: string
-  severity: enum[critical, warning, info]
-  selector: string
-  description: string
-  evidence:
-    current_value: string
-    expected_value: string | null
-
-FixSuggestion:
+AuditFix:   # app/app_utils/audit_schema.py
   finding_id: string
-  before: string
+  wcag: string
+  severity: enum[critical, warning, info]
+  title: string
+  before: string        # exact copy of the original HTML
   after: string
   explanation: string
 ```

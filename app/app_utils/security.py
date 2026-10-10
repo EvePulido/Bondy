@@ -45,6 +45,32 @@ def validate_input_before_audit(source: str, raw_html: str | None = None) -> Non
         )
 
 
+def validate_public_url(url: str) -> None:
+    """
+    SSRF guardrail: only allows http(s) URLs whose host resolves exclusively to
+    public IP addresses (no loopback, private, link-local or metadata ranges).
+    """
+    import ipaddress
+    import socket
+    from urllib.parse import urlparse
+
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https") or not parsed.hostname:
+        raise ValueError(f"URL not allowed: '{url}'. Only http(s) URLs are supported.")
+
+    try:
+        infos = socket.getaddrinfo(parsed.hostname, parsed.port or 443)
+    except socket.gaierror as e:
+        raise ValueError(f"Could not resolve host '{parsed.hostname}': {e}") from e
+
+    for info in infos:
+        ip = ipaddress.ip_address(info[4][0])
+        if not ip.is_global:
+            raise ValueError(
+                f"URL not allowed: '{parsed.hostname}' resolves to a non-public address."
+            )
+
+
 def get_safe_demo_path(source: str) -> str:
     """
     Returns the absolute local path to index.html if the source passes safety validation.

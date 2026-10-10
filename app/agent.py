@@ -13,11 +13,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import uuid
-import json
-from typing import List, Optional, Literal
-from pydantic import BaseModel, Field, field_validator
-
 from google.adk.agents import LlmAgent
 from google.adk.apps import App
 from google.adk.models import Gemini
@@ -35,55 +30,6 @@ patrones_path = (
 )
 with open(patrones_path, encoding="utf-8") as f:
     WCAG_GUIDELINES = f.read()
-
-
-# Eagerly loaded Python scripts as tools -----
-# ----- Data Contracts -----
-class Evidence(BaseModel):
-    current_value: str
-    expected_value: Optional[str] = None
-
-
-class Finding(BaseModel):
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    skill: str
-    wcag_criterion: str
-    severity: Literal["critical", "warning", "info"]
-    selector: str
-    description: str
-    evidence: Evidence
-
-
-class FixSuggestion(BaseModel):
-    finding_id: str
-    before: str
-    after: str
-    explanation: str
-
-
-class FindingsReport(BaseModel):
-    findings: list[Finding]
-
-
-class FixesReport(BaseModel):
-    fixes: list[FixSuggestion]
-
-    @field_validator("fixes", mode="before")
-    @classmethod
-    def parse_fix_strings(cls, v):
-        """Tolerates fixes sent as JSON strings by the LLM instead of dicts."""
-        if isinstance(v, list):
-            result = []
-            for item in v:
-                if isinstance(item, str):
-                    try:
-                        result.append(json.loads(item))
-                    except Exception:
-                        pass
-                else:
-                    result.append(item)
-            return result
-        return v
 
 
 import os
@@ -160,9 +106,16 @@ def verify_image_alt_text(url: str, current_alt: str) -> str:
             if not mime_type or not mime_type.startswith("image/"):
                 mime_type = "image/jpeg"
         else:
+            from app.app_utils.security import validate_public_url
+
+            try:
+                validate_public_url(url)
+            except ValueError as e:
+                return f"Error: {e} Assume the alt text needs manual review."
             req = urllib.request.Request(url, headers={"User-Agent": "Bondy/1.0"})
             with urllib.request.urlopen(req, timeout=10) as response:
-                image_data = response.read()
+                # Cap size to avoid memory exhaustion (10 MB)
+                image_data = response.read(10 * 1024 * 1024)
                 mime_type = response.headers.get_content_type()
                 if not mime_type or not mime_type.startswith("image/"):
                     mime_type = "image/jpeg"
@@ -179,7 +132,8 @@ def verify_image_alt_text(url: str, current_alt: str) -> str:
         )
 
         res = client.models.generate_content(
-            model="gemini-2.5-flash", contents=[image_part, prompt]
+            model=os.getenv("BONDY_VISION_MODEL", "gemini-flash-latest"),
+            contents=[image_part, prompt],
         )
         return f"Vision Analysis Result: {res.text}"
     except Exception as e:
@@ -195,6 +149,13 @@ root_agent = LlmAgent(
 When a user sends you a source path (e.g. 'demo_sites/site_1_bad_alt'), you MUST:
 
 STEP 1 — Call read_local_file(file_path=<source>) to get the HTML content.
+
+STEP 1.5 — DETERMINISTIC BASELINE: Call the `axe-accessibility-scanner` skill with the raw HTML content.
+  Treat its `violations` and `unnamed_interactive_elements` as confirmed, objective findings: report every one that
+  belongs to the requested criteria (map `wcag` to the criteria below). Do NOT discard them. For each, locate the
+  element in the ORIGINAL source to build the exact "before" string (axe's `html` is browser-serialized).
+  Then use the checks below to find what axe cannot judge (meaningfulness of alt text, decorative images,
+  keyboard traps, focus order). Do not report the same element twice.
 
 STEP 2 — Audit these WCAG criteria in the HTML:
   - WCAG 1.1.1: <img> tags — are alt attributes meaningful? decorative images should have alt="".

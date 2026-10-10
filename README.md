@@ -94,6 +94,7 @@ flowchart TD
 | **Document Auditing** | `document-language-validator`| Deterministic (DOM Parsing) | Validates root `<html>` lang attribute | 3.1.1 (Language of Page) |
 | | `text-contrast-calculator` | Playwright Simulation (Computed Styles) | Calculates text contrast mathematically against rendered backgrounds | 1.4.3 (Contrast) |
 | | `interactive-elements-validator`| Deterministic (DOM Parsing) | Identifies empty links or button tags | 2.4.4 / 4.1.2 (Name/Role) |
+| **Baseline** | `axe-accessibility-scanner` | Playwright + axe-core (Accessibility Tree) | Deterministic WCAG 2.x A/AA scan and unnamed-control detection | Multiple (2.0 / 2.1 / 2.2) |
 | **Refactoring** | `suggestion-fix-generator` | Gemini Text Refactoring | Generates clean HTML replacement code | N/A |
 
 ## Quick Start

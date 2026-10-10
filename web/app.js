@@ -324,7 +324,7 @@ async function runAudit() {
         dynamicScreen.innerHTML = '';
 
         if (data.status === 'success') {
-            const fixes = data.data || [];
+            const fixes = Array.isArray(data.data) ? data.data : [];
             const sourceType = data.source_type;
             const filePath = data.file_path || '';
             
@@ -339,25 +339,34 @@ async function runAudit() {
                 return { ...fix, ...info };
             });
 
-            // Calculate scoring details
-            // Simulate a proportional scoring system (like Lighthouse's weighted averages)
-            // We estimate 8 critical interactive/media elements per selected category.
-            const estimatedElementsPerCategory = 8;
-            const totalEstimatedElements = checkedBoxes.length * estimatedElementsPerCategory;
-            
-            // Critical errors deduct 1 full point (100% failure for that element)
-            // Warnings deduct 0.5 points (50% failure for that element)
-            const totalErrorsWeight = criticalCount + (warningCount * 0.5);
-            
-            // Calculate the proportion of passed elements
-            let calculatedScore = ((totalEstimatedElements - totalErrorsWeight) / totalEstimatedElements) * 100;
-            
-            // Bound the score tightly between 0 and 100
-            const score = fixes.length === 0 ? 100 : Math.max(0, Math.min(100, Math.round(calculatedScore)));
-            
-            // Update the passed count UI to reflect this estimation logic
-            const passedCount = Math.max(0, totalEstimatedElements - Math.ceil(totalErrorsWeight));
-            const baseChecksCount = totalEstimatedElements;
+            // Scoring: based on real rule counts from the deterministic axe baseline.
+            // Units are rules/criteria: passed rules vs. distinct WCAG criteria that failed.
+            const stats = data.stats || null;
+            let score;
+            let passedCount;
+
+            if (stats && typeof stats.passes === 'number') {
+                // Each failed criterion weighs 1 (any critical finding) or 0.5 (warnings only)
+                const failedByCriterion = {};
+                classifiedFixes.forEach(f => {
+                    const w = f.severity === 'critical' ? 1 : 0.5;
+                    failedByCriterion[f.wcag] = Math.max(failedByCriterion[f.wcag] || 0, w);
+                });
+                const failedWeight = Object.values(failedByCriterion).reduce((a, b) => a + b, 0);
+                const totalRules = stats.passes + failedWeight;
+                score = classifiedFixes.length === 0
+                    ? 100
+                    : Math.max(0, Math.min(100, Math.round((stats.passes / totalRules) * 100)));
+                passedCount = stats.passes;
+            } else {
+                // Fallback when the baseline could not run: rough estimate
+                const estimatedElementsPerCategory = 8;
+                const totalEstimatedElements = checkedBoxes.length * estimatedElementsPerCategory;
+                const totalErrorsWeight = criticalCount + (warningCount * 0.5);
+                const calculated = ((totalEstimatedElements - totalErrorsWeight) / totalEstimatedElements) * 100;
+                score = classifiedFixes.length === 0 ? 100 : Math.max(0, Math.min(100, Math.round(calculated)));
+                passedCount = Math.max(0, totalEstimatedElements - Math.ceil(totalErrorsWeight));
+            }
 
             const circumference = 2 * Math.PI * 48; // Radius 48, ~301.59
             let dashLength = (score / 100) * circumference;
@@ -537,8 +546,15 @@ async function runAudit() {
         }
     } catch (error) {
         clearInterval(stepInterval);
-        alert('Failed to connect to the server.');
-        resetToConfigure();
+        dynamicScreen.innerHTML = `
+            <div class="results-container" style="max-width: 600px; margin: 40px auto; text-align: center;">
+                <div class="card card-pad" style="padding: 40px; border-radius: 20px;">
+                    <h3 class="mt-3 text-danger" style="font-weight: 700; color: #dc2626;" role="alert">Audit Failed</h3>
+                    <p class="text-muted" style="margin: 16px 0; line-height:1.6;">${escapeHtml(error && error.message ? error.message : 'Unexpected error while processing the audit response.')}</p>
+                    <button class="btn-primary" onclick="resetToConfigure()" style="max-width:200px; margin: 0 auto;">Try Again</button>
+                </div>
+            </div>
+        `;
     }
 }
 
@@ -589,11 +605,11 @@ async function copyText(text, btn) {
 }
 
 async function applyFix(findingBody, filePath, btn) {
+    const originalText = btn.innerHTML;
     try {
         const beforeText = findingBody.querySelector('.code-box.before code').textContent;
         const afterText = findingBody.querySelector('.code-box.after code').textContent;
 
-        const originalText = btn.innerHTML;
         btn.innerHTML = `<span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle;margin-right:4px;">sync</span> Applying...`;
         
         const response = await fetch('/api/apply-fix', {
