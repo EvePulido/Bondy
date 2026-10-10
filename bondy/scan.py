@@ -7,9 +7,11 @@ browser-based scanners) and never imports FastAPI, ADK or the Gemini client.
 from __future__ import annotations
 
 import fnmatch
+import hashlib
 import importlib.util
 import os
 import re
+import time
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -23,6 +25,8 @@ from bondy.resources import SKILLS_DIR
 MAX_FILE_BYTES = 2 * 1024 * 1024  # larger files are skipped with a note
 SEVERITY_RANK = {"warning": 1, "critical": 2}
 MAX_PAGES_SKIP = "--max-pages limit reached"
+INTERRUPTED_SKIP = "interrupted by the user (Ctrl+C)"
+SCAN_TIMEOUT_SKIP = "--scan-timeout reached"
 
 Scanner = Callable[[str], list[dict]]
 
@@ -37,6 +41,11 @@ class FileResult:
     omitted: dict[str, str] = field(default_factory=dict)
     # browser-free replacements that ran instead of an omitted check
     fallbacks: list[str] = field(default_factory=list)
+    # content read ONCE at load time: what was scanned and its hash (B9)
+    html: str | None = field(default=None, repr=False)
+    sha256: str | None = None
+    # previous result reused because the page (and its images) did not change
+    reused: bool = False
 
 
 # ----- Discovery -----
@@ -254,12 +263,47 @@ STATIC_FORCED = "static mode forced"
 STATIC_FORCED_REASON = "skipped: static mode forced (--static)"
 
 
-def _read_text(path: Path) -> str:
-    raw = path.read_bytes()
+def decode_html(raw: bytes) -> str:
+    """UTF-8 (BOM tolerated) or, failing that, Latin-1. CRLF is preserved."""
     try:
         return raw.decode("utf-8-sig")
     except UnicodeDecodeError:
         return raw.decode("latin-1")
+
+
+def _read_text(path: Path) -> str:
+    return decode_html(path.read_bytes())
+
+
+def _is_bondy_report(html: str) -> bool:
+    """True for the HTML report Bondy itself writes (marked in its <head>)."""
+    from bondy.core.checks import REPORT_GENERATOR
+
+    head = html[:4096].lower()
+    return f'name="generator" content="{REPORT_GENERATOR}"' in head
+
+
+def load_page(path: Path) -> FileResult:
+    """Reads and validates one page (no scanning). Content is read exactly once."""
+    result = FileResult(path=str(path))
+    try:
+        if path.stat().st_size > MAX_FILE_BYTES:
+            result.skipped = f"larger than {MAX_FILE_BYTES // (1024 * 1024)} MB"
+            return result
+        raw = path.read_bytes()
+        html = decode_html(raw)
+        # AGENTS.md rule 1: validate before any Playwright navigation. The
+        # content is passed as raw HTML (the page is never fetched by URL).
+        validate_input_before_audit(str(path), raw_html=html)
+    except (OSError, ValueError) as e:
+        result.errors.append(str(e))
+        return result
+    if _is_bondy_report(html):
+        result.skipped = "Bondy report (not a page to scan)"
+        return result
+    result.html = html
+    result.sha256 = hashlib.sha256(raw).hexdigest()
+    return result
 
 
 def _criteria(checks: Iterable[str]) -> set[str]:
@@ -314,38 +358,29 @@ def scan_html(
     return findings, errors
 
 
-def scan_path(
-    target: Path | str,
-    include: Iterable[str],
-    exclude: Iterable[str],
+def scan_loaded(
+    results: list[FileResult],
     checks: Iterable[str] = (),
     scanners: dict[str, Scanner] | None = None,
     force_static: bool = False,
-    max_files: int | None = None,
-) -> list[FileResult]:
-    """Scans ``target``. Files beyond ``max_files`` are listed as skipped."""
-    results: list[FileResult] = []
+    deadline: float | None = None,
+) -> None:
+    """Runs the scanners on pages already loaded with ``load_page`` (in place).
+
+    ``deadline`` is a ``time.monotonic()`` instant: pages not started by then
+    are marked skipped (``SCAN_TIMEOUT_SKIP``). Ctrl+C marks the page in
+    progress and the rest as skipped (``INTERRUPTED_SKIP``) and returns.
+    """
     active = dict(scanners or SCANNERS)
     # Reason the browser scanners were dropped; set on the first launch failure
     # so later files do not retry (and re-fail) the launch for every scanner.
     browser_down: str | None = STATIC_FORCED if force_static else None
-    for index, path in enumerate(discover(target, include, exclude)):
-        result = FileResult(path=str(path))
-        results.append(result)
-        if max_files is not None and index >= max_files:
-            result.skipped = f"{MAX_PAGES_SKIP} ({max_files})"
-            continue
-        try:
-            if path.stat().st_size > MAX_FILE_BYTES:
-                result.skipped = f"larger than {MAX_FILE_BYTES // (1024 * 1024)} MB"
-                continue
-            html = _read_text(path)
-            # AGENTS.md rule 1: validate before any Playwright navigation. The
-            # content is passed as raw HTML (the page is never fetched by URL).
-            validate_input_before_audit(str(path), raw_html=html)
-        except (OSError, ValueError) as e:
-            result.errors.append(str(e))
-            continue
+    todo = [r for r in results if r.html is not None and not r.skipped]
+    for i, result in enumerate(todo):
+        if deadline is not None and time.monotonic() > deadline:
+            for r in todo[i:]:
+                r.skipped = SCAN_TIMEOUT_SKIP
+            return
         to_run = active
         if browser_down is not None:
             to_run = {n: r for n, r in active.items() if n not in BROWSER_SCANNERS}
@@ -353,7 +388,14 @@ def scan_path(
                 if n in BROWSER_SCANNERS and n in STATIC_FALLBACKS:
                     fb_name, fb = STATIC_FALLBACKS[n]
                     to_run[fb_name] = fb
-        result.findings, result.errors, unavailable = run_scanners(html, checks, to_run)
+        try:
+            result.findings, result.errors, unavailable = run_scanners(
+                result.html or "", checks, to_run
+            )
+        except KeyboardInterrupt:
+            for r in todo[i:]:
+                r.findings, r.errors, r.skipped = [], [], INTERRUPTED_SKIP
+            return
         if browser_down is None and unavailable:
             browser_down = next(iter(unavailable.values()))
         if browser_down is not None:
@@ -367,6 +409,28 @@ def scan_path(
             result.fallbacks = [
                 STATIC_FALLBACKS[n][0] for n in dropped if n in STATIC_FALLBACKS
             ]
+
+
+def scan_path(
+    target: Path | str,
+    include: Iterable[str],
+    exclude: Iterable[str],
+    checks: Iterable[str] = (),
+    scanners: dict[str, Scanner] | None = None,
+    force_static: bool = False,
+    max_files: int | None = None,
+    deadline: float | None = None,
+) -> list[FileResult]:
+    """Scans ``target``. Files beyond ``max_files`` are listed as skipped."""
+    results: list[FileResult] = []
+    for index, path in enumerate(discover(target, include, exclude)):
+        if max_files is not None and index >= max_files:
+            results.append(
+                FileResult(path=str(path), skipped=f"{MAX_PAGES_SKIP} ({max_files})")
+            )
+        else:
+            results.append(load_page(path))
+    scan_loaded(results, checks, scanners, force_static, deadline)
     return results
 
 

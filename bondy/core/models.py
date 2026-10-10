@@ -40,6 +40,8 @@ class ImageOutcome:
     static_problems: list[str] = field(default_factory=list)
     reason: str = ""  # why manual review / skipped, or why a fix
     severity: Literal["critical", "warning"] = "warning"
+    # failed for a reason that may not repeat (provider/network): never reused
+    transient: bool = False
     origin: Literal["template", "llm", "none"] = "none"
 
 
@@ -86,6 +88,13 @@ class UsageSummary:
     request_limit_is_default: bool = False
     partial: bool = False
     partial_reasons: list[str] = field(default_factory=list)
+    cache_enabled: bool = False
+    cache_hits: int = 0  # unique images answered from the cache
+    cache_misses: int = 0
+    cache_writes: int = 0
+    pages_scanned: int = 0
+    pages_reused: int = 0  # unchanged: previous result reused
+    resumed: bool = False
 
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)

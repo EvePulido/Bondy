@@ -11,30 +11,60 @@ above the threshold was found, so a clean pass cannot be claimed).
 
 from __future__ import annotations
 
+import hashlib
 import html as html_lib
+import re
+import subprocess
+import time
 from collections.abc import Callable, Iterable
+from dataclasses import asdict
 from functools import partial
 from pathlib import Path
 
-from bondy.config import Settings
+from bondy.app_utils.browser import browser_session
+from bondy.config import ConfigError, Settings
 from bondy.core.budget import (
     Limits,
     Pricing,
     UsageTracker,
     require_prices_for_limits,
 )
-from bondy.core.checks import check_wcag
+from bondy.core.checks import CHECKS, check_wcag
 from bondy.core.fixes import build_fix
-from bondy.core.images import ImageLoader, extract_images, load_image
-from bondy.core.models import ImageOccurrence, ImageOutcome, ScanReport, UsageSummary
+from bondy.core.images import (
+    ImageLoader,
+    asset_fingerprint,
+    extract_images,
+    load_image,
+)
+from bondy.core.models import (
+    ImageFix,
+    ImageOccurrence,
+    ImageOutcome,
+    ScanReport,
+    UsageSummary,
+)
 from bondy.core.providers.base import LLMProvider
-from bondy.core.semantic import analyze_images
+from bondy.core.redact import contains_secret
+from bondy.core.semantic import PROMPT_FINGERPRINT, analyze_images
+from bondy.core.store import (
+    Store,
+    bondy_version,
+    resolve_cache_dir,
+    sha256_hex,
+)
+from bondy.core.suppress import check_inline_syntax
 from bondy.scan import (
+    INTERRUPTED_SKIP,
     MAX_PAGES_SKIP,
+    SCAN_TIMEOUT_SKIP,
+    SCANNERS,
     FileResult,
     Scanner,
     _read_text,
-    scan_path,
+    discover,
+    load_page,
+    scan_loaded,
     static_mode_note,
 )
 from bondy.scan import (
@@ -65,10 +95,12 @@ def collect_images(
         if r.skipped:
             continue
         path = Path(r.path)
-        try:
-            html = _read_text(path)
-        except OSError:
-            continue
+        html = r.html
+        if html is None:
+            try:
+                html = _read_text(path)
+            except OSError:
+                continue
         out += extract_images(html, str(path), str(path.resolve().parent), str(root))
     return out
 
@@ -132,8 +164,9 @@ def _apply_image_results(
     report: ScanReport,
     occurrences: list[ImageOccurrence],
     outcomes: list[ImageOutcome],
+    pages: list[FileResult] | None = None,
 ) -> None:
-    by_file = {r.path: r for r in report.files}
+    by_file = {r.path: r for r in (pages if pages is not None else report.files)}
     handled: dict[str, set[str]] = {}
     fix_index: dict[tuple[str, str, str], int] = {}
     counters: dict[str, int] = {}
@@ -158,6 +191,106 @@ def _apply_image_results(
         _drop_duplicate_image_alt(by_file[path], srcs)
 
 
+_REF = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/@^~{}+-]*$")
+
+
+def changed_since(root: Path, ref: str) -> set[str]:
+    """Resolved paths of files changed vs ``ref`` (tracked diff + untracked).
+
+    ``ref`` is validated (no leading dash, no spaces) and passed after the
+    subcommand with ``--`` ending the revision list, so it cannot inject git
+    options.
+    """
+    if not _REF.match(ref):
+        raise ConfigError(f"--since: {ref!r} is not a valid git ref.")
+    cmds = (
+        ["git", "-C", str(root), "diff", "--name-only", "--relative", ref, "--"],
+        ["git", "-C", str(root), "ls-files", "--others", "--exclude-standard"],
+    )
+    names: set[str] = set()
+    for cmd in cmds:
+        try:
+            out = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=30, check=False
+            )
+        except (OSError, subprocess.SubprocessError) as e:
+            raise ConfigError(f"--since needs git: {e}") from e
+        if out.returncode != 0:
+            raise ConfigError(
+                f"--since {ref}: git failed ({out.stderr.strip()[:200] or 'error'}). "
+                "Is the folder inside a git repository and the ref valid?"
+            )
+        names.update(line for line in out.stdout.splitlines() if line.strip())
+    return {str((root / n).resolve()) for n in names}
+
+
+def config_fingerprint(
+    settings: Settings, llm: bool, scanners: dict[str, Scanner] | None
+) -> str:
+    """Anything that changes what a page's result would be (B9/B10)."""
+    parts = [
+        bondy_version(),
+        ",".join(sorted(settings.checks)),
+        f"static={settings.static}",
+        f"llm={llm}",
+        ",".join(c.id for c in CHECKS),
+        ",".join(sorted(scanners or SCANNERS)),
+    ]
+    if llm:
+        parts += [
+            settings.vision_model,
+            settings.fallback_model,
+            f"remote={settings.remote_images}",
+            PROMPT_FINGERPRINT,
+        ]
+    return sha256_hex(*parts)
+
+
+def _rel(path: str | Path, root: Path) -> str:
+    try:
+        return Path(path).resolve().relative_to(root).as_posix()
+    except ValueError:
+        return Path(path).resolve().as_posix()
+
+
+def _is_complete(r: FileResult, outcomes: list[ImageOutcome]) -> bool:
+    """Only a fully resolved page may be stored/reused."""
+    if r.html is None or r.skipped or r.errors:
+        return False
+    return not any(o.recommendation == "skipped" or o.transient for o in outcomes)
+
+
+def _entry(
+    r: FileResult,
+    outcomes: list[ImageOutcome],
+    fixes: list[ImageFix],
+    images_fp: str | None,
+) -> dict:
+    def strip(d: dict) -> dict:
+        d = dict(d)
+        d.pop("file", None)  # no absolute paths in the store
+        return d
+
+    return {
+        "sha256": r.sha256,
+        "images": images_fp,
+        "findings": r.findings,
+        "omitted": r.omitted,
+        "fallbacks": r.fallbacks,
+        "outcomes": [strip(asdict(o)) for o in outcomes],
+        "fixes": [strip(asdict(f)) for f in fixes],
+    }
+
+
+def _images_fp(occs: list[ImageOccurrence]) -> str:
+    """Hash of the local image files a page references (remote ones: by URL)."""
+    seen: dict[str, str] = {}
+    for o in occs:
+        if o.src and o.src not in seen:
+            seen[o.src] = asset_fingerprint(o)
+    return sha256_hex(*[f"{k}\0{v}" for k, v in sorted(seen.items())])
+
+
 def run_scan(
     target: Path | str,
     settings: Settings,
@@ -166,30 +299,79 @@ def run_scan(
     provider: LLMProvider | None = None,
     loader: ImageLoader | None = None,
     progress: Callable[[str], None] | None = None,
+    changed_only: bool = False,
+    resume: bool = False,
+    since: str | None = None,
+    clear_cache: bool = False,
 ) -> ScanReport:
     """Runs the whole pipeline for ``target`` and returns a ``ScanReport``.
 
-    ``provider``/``loader`` are injectable (tests use ``FakeProvider``); by
-    default the Gemini provider is built from ``settings`` and images are
-    loaded from the project or, for http(s), through the public-host guard.
+    Order: discover/load pages -> reuse unchanged pages (``changed_only`` /
+    ``resume``) -> semantic image stage (cache first, so a bad API key fails
+    before any browser starts) -> scanners in ONE shared browser -> merge ->
+    persist page state and the resume marker.
+
+    ``provider``/``loader`` are injectable (tests use ``FakeProvider``).
     """
     require_prices_for_limits(settings)  # before any scanner/request
-    results = scan_path(
-        target,
-        settings.include,
-        settings.exclude,
-        settings.checks,
-        scanners=scanners,
-        force_static=settings.static,
-        max_files=settings.max_pages,
-    )
-    report = ScanReport(files=results, usage=UsageSummary())
+    root = project_root(target)
+    cache_dir = resolve_cache_dir(settings.cache_dir, root)
+    if (changed_only or resume) and not settings.cache:
+        raise ConfigError(
+            "--changed-only/--resume need the cache directory, but caching is "
+            "disabled (--no-cache / cache = false)."
+        )
+    if clear_cache:
+        Store(cache_dir, enabled=True).clear()
+    started = time.monotonic()
+    deadline = started + settings.scan_timeout if settings.scan_timeout else None
+
+    report = ScanReport(files=[], usage=UsageSummary())
     usage = report.usage
+    llm = not settings.no_llm and (provider is not None or bool(settings.api_key))
+    # Persistence is only created when something needs it (verdict cache with
+    # the LLM, --changed-only, --since, --resume): a plain deterministic scan
+    # writes nothing into the scanned project.
+    needs_disk = llm or changed_only or resume or since is not None
+    store = Store(cache_dir, enabled=settings.cache and needs_disk)
+    usage.cache_enabled = store.enabled
+    if settings.no_llm:
+        usage.mode = "no-llm"
+    elif not llm:
+        usage.mode = "no-llm"
+        report.notes.append(NO_KEY_NOTE)
+    else:
+        usage.mode = "llm"
+    config_fp = config_fingerprint(settings, llm, scanners)
+
+    # 1. discover + load (content is read once: it is what gets scanned/hashed)
+    selected = changed_since(root, since) if since else None
+    results: list[FileResult] = []
+    unselected: set[str] = set()  # pages outside the --since diff (reuse-only)
+    for index, path in enumerate(discover(target, settings.include, settings.exclude)):
+        if settings.max_pages is not None and index >= settings.max_pages:
+            results.append(
+                FileResult(
+                    path=str(path),
+                    skipped=f"{MAX_PAGES_SKIP} ({settings.max_pages})",
+                )
+            )
+        elif selected is not None and str(path.resolve()) not in selected:
+            # Read it anyway: a valid saved result (same content hash and
+            # configuration) is reused; otherwise it is reported as skipped.
+            page = load_page(path)
+            unselected.add(page.path)
+            results.append(page)
+        else:
+            results.append(load_page(path))
+    report.files = results
+    # E4: a malformed bondy-ignore comment is a usage error, raised before any
+    # request or browser work.
+    check_inline_syntax(
+        {_rel(r.path, root): r.html for r in results if r.html is not None}
+    )
     if not results:
         report.notes.append("No HTML files found to scan.")
-    static_note = static_mode_note(results)
-    if static_note:
-        report.notes.append(static_note)
     cut = [r for r in results if r.skipped and r.skipped.startswith(MAX_PAGES_SKIP)]
     if cut:
         usage.partial = True
@@ -197,31 +379,178 @@ def run_scan(
             f"{MAX_PAGES_SKIP} ({settings.max_pages}): {len(cut)} page(s) not scanned"
         )
 
-    if settings.no_llm:
-        usage.mode = "no-llm"
-    elif provider is None and not settings.api_key:
-        usage.mode = "no-llm"
-        report.notes.append(NO_KEY_NOTE)
-    else:
-        usage.mode = "llm"
-        _semantic_stage(report, settings, target, provider, loader, progress)
+    # 2. occurrences per page and reuse of unchanged pages
+    loaded = [r for r in results if r.html is not None and not r.skipped]
+    occs_by_file: dict[str, list[ImageOccurrence]] = {
+        r.path: extract_images(
+            r.html or "", r.path, str(Path(r.path).resolve().parent), str(root)
+        )
+        for r in loaded
+    }
+    images_fp = {
+        r.path: (_images_fp(occs_by_file[r.path]) if llm else None) for r in loaded
+    }
+    prior_all = store.load_pages(config_fp)
+    resume_marker = store.load_resume() if resume else None
+    if resume:
+        usage.resumed = resume_marker is not None
+        if resume_marker is None:
+            report.notes.append(
+                "--resume: no interrupted scan found; running a normal scan."
+            )
+        elif resume_marker.get("config") != config_fp:
+            usage.resumed = False
+            report.notes.append(
+                "--resume: Bondy version/configuration changed since the "
+                "interrupted scan; its page results were discarded."
+            )
+    todo: list[FileResult] = []
+    reuse_ok = (changed_only or (resume and usage.resumed)) and bool(prior_all)
+    for r in loaded:
+        outside_diff = r.path in unselected
+        # Pages outside the --since diff may always reuse a valid saved result.
+        allowed = bool(prior_all) if outside_diff else reuse_ok
+        entry = prior_all.get(_rel(r.path, root)) if allowed else None
+        if (
+            entry
+            and entry.get("sha256") == r.sha256
+            and entry.get("images") == images_fp[r.path]
+        ):
+            _apply_entry(report, r, entry)
+            usage.pages_reused += 1
+        elif outside_diff:
+            r.skipped = f"unchanged since {since} (no saved result to reuse)"
+        else:
+            todo.append(r)
+    usage.pages_scanned = len(todo)
 
+    # 3. semantic stage on the pages that need work (cache -> batches)
+    todo_occs = [o for r in todo for o in occs_by_file[r.path]]
+    stage = None
+    if llm:
+        usage.images_found = len(todo_occs)
+    if llm and todo_occs:
+        stage = _semantic_stage(
+            report, settings, todo_occs, provider, loader, progress, store, deadline
+        )
+
+    # 4. deterministic scanners, ONE browser for the whole scan
+    with browser_session(settings.timeout):
+        scan_loaded(
+            todo,
+            settings.checks,
+            scanners,
+            force_static=settings.static,
+            deadline=deadline,
+        )
+    static_note = static_mode_note(results)
+    if static_note:
+        report.notes.append(static_note)
+
+    # 5. merge image verdicts into the pages (after scanners: they replace findings)
+    if stage is not None:
+        _apply_image_results(report, todo_occs, stage.outcomes, todo)
+    interrupted = [r for r in results if r.skipped == INTERRUPTED_SKIP]
+    timed_out = [r for r in results if r.skipped == SCAN_TIMEOUT_SKIP]
+    for pages, reason in (
+        (interrupted, INTERRUPTED_SKIP),
+        (timed_out, SCAN_TIMEOUT_SKIP),
+    ):
+        if pages:
+            usage.partial = True
+            msg = f"{reason}: {len(pages)} page(s) not scanned"
+            if msg not in usage.partial_reasons:
+                usage.partial_reasons.append(msg)
+
+    # 6. persist: page results, resume marker, usage of the cache
+    _persist(report, store, config_fp, root, todo, images_fp, occs_by_file, prior_all)
+    report.notes.extend(w for w in store.warnings if w not in report.notes)
+    if usage.partial and store.enabled and results:
+        pending = sum(1 for r in results if r.skipped or r.errors)
+        store.save_resume(config_fp, list(usage.partial_reasons), pending)
+    elif store.enabled and results:
+        store.clear_resume()
     return report
+
+
+def _apply_entry(report: ScanReport, r: FileResult, entry: dict) -> None:
+    r.findings = list(entry.get("findings", []))
+    r.omitted = dict(entry.get("omitted", {}))
+    r.fallbacks = list(entry.get("fallbacks", []))
+    r.reused = True
+    for d in entry.get("outcomes", []):
+        report.images.append(ImageOutcome(file=r.path, **d))
+    for d in entry.get("fixes", []):
+        report.fixes.append(ImageFix(file=r.path, **d))
+
+
+def _persist(
+    report: ScanReport,
+    store: Store,
+    config_fp: str,
+    root: Path,
+    todo: list[FileResult],
+    images_fp: dict[str, str | None],
+    occs_by_file: dict[str, list[ImageOccurrence]],
+    prior_all: dict[str, dict],
+) -> None:
+    """Writes complete, unmodified pages to ``pages.json``."""
+    if not store.enabled or not report.files:
+        return  # nothing scanned: leave no trace on disk
+    pages = {
+        k: v for k, v in prior_all.items() if (root / k).exists()
+    }  # forget deleted pages
+    changed_during_scan = 0
+    with_secrets = 0
+    for r in todo:
+        key = _rel(r.path, root)
+        outcomes = [o for o in report.images if o.file == r.path]
+        if not _is_complete(r, outcomes):
+            pages.pop(key, None)  # stale result: never reuse it
+            continue
+        try:
+            now = hashlib.sha256(Path(r.path).read_bytes()).hexdigest()
+        except OSError:
+            now = None
+        if now != r.sha256:
+            changed_during_scan += 1
+            pages.pop(key, None)
+            continue
+        fixes = [f for f in report.fixes if f.file == r.path]
+        entry = _entry(r, outcomes, fixes, images_fp.get(r.path))
+        if contains_secret(entry):
+            # D3: its findings quote the project's HTML; never write secret-like
+            # text to disk. The page is simply re-scanned next time (its model
+            # verdicts are cached, so that costs no request).
+            with_secrets += 1
+            pages.pop(key, None)
+            continue
+        pages[key] = entry
+    if changed_during_scan:
+        report.notes.append(
+            f"{changed_during_scan} page(s) changed while being scanned: their "
+            "results are valid for the content that was read but were not saved "
+            "for reuse."
+        )
+    if with_secrets:
+        report.notes.append(
+            f"{with_secrets} page(s) contain secret-like text in their findings "
+            "and were not saved for reuse (they are re-scanned each time)."
+        )
+    store.save_pages(config_fp, pages)
 
 
 def _semantic_stage(
     report: ScanReport,
     settings: Settings,
-    target: Path | str,
+    occurrences: list[ImageOccurrence],
     provider: LLMProvider | None,
     loader: ImageLoader | None,
     progress: Callable[[str], None] | None,
-) -> None:
+    store: Store,
+    deadline: float | None,
+):
     usage = report.usage
-    occurrences = collect_images(report.files, target)
-    usage.images_found = len(occurrences)
-    if not occurrences:
-        return
     if provider is None:
         from bondy.core.providers.gemini import GeminiProvider
 
@@ -238,14 +567,19 @@ def _semantic_stage(
         max_images=settings.max_images,
         tokens_per_image=settings.tokens_per_image,
         progress=progress,
+        store=store,
+        model=settings.vision_model,
+        deadline=deadline,
     )
-    _apply_image_results(report, occurrences, stage.outcomes)
     tracker.fill(usage)
     usage.images_unique = stage.unique
     usage.images_verified = stage.verified
     usage.images_by_template = stage.by_template
     usage.images_manual_review = stage.manual_review
     usage.images_skipped = stage.skipped
+    usage.cache_hits = stage.cache_hits
+    usage.cache_misses = stage.cache_misses
+    usage.cache_writes = stage.cache_writes
     if stage.partial_reasons:
         usage.partial = True
         usage.partial_reasons += stage.partial_reasons
@@ -254,6 +588,7 @@ def _semantic_stage(
         report.notes.append(
             f"{skipped} image occurrence(s) were not verified (see partial reasons)."
         )
+    return stage
 
 
 def exit_code(report: ScanReport, fail_on: str) -> int:

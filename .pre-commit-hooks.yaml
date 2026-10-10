@@ -1,0 +1,23 @@
+# Bondy as a pre-commit hook: scans only the HTML files changed against HEAD
+# (staged, unstaged and untracked). It runs offline (--no-llm) and writes nothing
+# into the project (--no-cache).
+#
+# .pre-commit-config.yaml of your project:
+#
+#   repos:
+#     - repo: https://github.com/<owner>/Bondy   # TODO: the real repository URL
+#       rev: <tag or commit of a Bondy release>
+#       hooks:
+#         - id: bondy
+#           args: [--fail-on, warning]            # extra `bondy scan` flags
+#
+# Notes: it needs at least one commit (HEAD must exist). Without Chromium
+# (`python -m playwright install chromium`) or a system Chrome/Edge, Bondy runs in
+# static mode and says so.
+- id: bondy
+  name: Bondy accessibility check (changed HTML)
+  description: Scan changed HTML files for WCAG issues, deterministic checks only.
+  entry: bondy scan . --since HEAD --no-llm --no-cache
+  language: python
+  types: [html]
+  pass_filenames: false

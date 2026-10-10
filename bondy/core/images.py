@@ -32,6 +32,13 @@ SUPPORTED_MIME = {
     "image/heif",
 }
 REMOTE_TIMEOUT_S = 10
+# Files that commonly hold credentials are never read as images, whatever their
+# bytes look like (D3: ".env is never sent to the model").
+SENSITIVE_NAME = re.compile(
+    r"^(\.env(\..*)?|.*\.(pem|key|p12|pfx|kdbx)|id_(rsa|dsa|ecdsa|ed25519)|"
+    r"\.npmrc|\.netrc|credentials(\..*)?)$",
+    re.IGNORECASE,
+)
 
 _LANG = re.compile(
     r"""<html\b[^>]*?\blang\s*=\s*["']?([A-Za-z]{2,3}(?:-[A-Za-z0-9]+)*)""", re.I
@@ -231,6 +238,11 @@ def _load_local(occ: ImageOccurrence, ref: str, max_bytes: int) -> bytes:
     # Containment (also defeats ../ and symlinks pointing outside the project)
     if not target.is_relative_to(root):
         raise ImageLoadError("image path is outside the project root")
+    if SENSITIVE_NAME.match(target.name):
+        raise ImageLoadError(
+            f"'{target.name}' looks like a credentials file and is never sent "
+            "to the model"
+        )
     if not target.is_file():
         raise ImageLoadError("image file not found (404)")
     try:
@@ -275,3 +287,22 @@ def source_key(occ: ImageOccurrence) -> str:
     root = Path(occ.root_dir or occ.page_dir or ".")
     base = root if rel.startswith("/") else Path(occ.page_dir or ".")
     return os.path.normpath(str(base / rel.lstrip("/")))
+
+
+def asset_fingerprint(occ: ImageOccurrence, max_bytes: int = MAX_IMAGE_BYTES) -> str:
+    """Identity of an image's *content* for page-level reuse (B9).
+
+    Local files are hashed (so editing an image invalidates the pages using it);
+    remote ones are identified by URL only (not downloaded).
+    """
+    import hashlib
+
+    src = occ.src or ""
+    if not src or src.lower().startswith("data:"):
+        return "inline"
+    if is_remote_src(src):
+        return "remote"
+    try:
+        return hashlib.sha256(_load_local(occ, src, max_bytes)).hexdigest()
+    except ImageLoadError as e:
+        return f"unavailable:{e}"

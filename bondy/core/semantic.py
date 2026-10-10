@@ -11,13 +11,14 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Literal
 
 from pydantic import BaseModel, ValidationError
 
-from bondy.app_utils.vision_tools import (
+from bondy.core.alt_rules import (
     ALT_SYSTEM_RULES,
     REDUNDANT_PREFIX,
     AltVerdict,
@@ -45,6 +46,8 @@ from bondy.core.providers.base import (
     MediaPart,
     ProviderError,
 )
+from bondy.core.redact import redact_secrets
+from bondy.core.store import Store, sha256_hex
 
 # Bump when ALT_SYSTEM_RULES/BATCH_RULES or the schema change (cache key, B4).
 PROMPT_VERSION = "alt-batch-1"
@@ -84,6 +87,15 @@ class BatchAnalysis(BaseModel):
     results: list[ImageAnalysis]
 
 
+# Changes whenever the prompt text, its version or the output schema change, so
+# cached verdicts made under another prompt/schema are never reused (B4).
+PROMPT_FINGERPRINT = sha256_hex(
+    PROMPT_VERSION,
+    BATCH_RULES,
+    json.dumps(BatchAnalysis.model_json_schema(), sort_keys=True),
+)[:16]
+
+
 # ----- Groups: unique (image, alt) pairs -----
 @dataclass
 class Group:
@@ -94,6 +106,9 @@ class Group:
     analysis: ImageAnalysis | None = None
     failure: str | None = None  # why it could not be verified (manual review)
     skipped: str | None = None  # why it was not processed (limit/quota)
+    transient: bool = False  # failure may not repeat (provider/network)
+    cache_key: str | None = None
+    from_cache: bool = False
 
 
 @dataclass
@@ -108,6 +123,9 @@ class StageResult:
     manual_review: int = 0
     skipped: int = 0
     batches: int = 0
+    cache_hits: int = 0
+    cache_misses: int = 0
+    cache_writes: int = 0
 
 
 # ----- Deterministic part -----
@@ -161,7 +179,9 @@ def resolve_deterministic(occ: ImageOccurrence) -> ImageOutcome | None:
     )
 
 
-def fallback_outcome(occ: ImageOccurrence, reason: str) -> ImageOutcome:
+def fallback_outcome(
+    occ: ImageOccurrence, reason: str, transient: bool = False
+) -> ImageOutcome:
     """Image could not be verified: template fix if the alt text alone allows it."""
     static = alt_text_static_checks(occ.alt)
     if occ.alt and "redundant_prefix" in static:
@@ -179,7 +199,10 @@ def fallback_outcome(occ: ImageOccurrence, reason: str) -> ImageOutcome:
                 ),
             )
     return _outcome(
-        occ, "needs_manual_review", reason=f"could not verify the image: {reason}"
+        occ,
+        "needs_manual_review",
+        reason=f"could not verify the image: {reason}",
+        transient=transient,
     )
 
 
@@ -278,20 +301,47 @@ def decide(occ: ImageOccurrence, a: ImageAnalysis) -> ImageOutcome:
 
 
 # ----- Requests -----
-def _image_block(index: int, g: Group) -> list:
-    occ = g.occurrences[0]
+def _image_payload(occ: ImageOccurrence) -> tuple[str, str, str, str, str]:
+    """Exactly what the model is told about an image besides its pixels."""
     heur = decorative_heuristics(occ.tag, occ.context)
     attr = "false" if occ.alt is None else "true"
-    alt = _neutralize(occ.alt or "", ALT_FOR_MODEL_CHARS)
-    context = _neutralize(occ.context, CONTEXT_FOR_MODEL_CHARS)
+    # D3: redact BEFORE truncating (a cut can leave a recognizable prefix) and
+    # before anything is hashed for the verdict cache or sent to the model.
+    alt = _neutralize(redact_secrets(occ.alt or ""), ALT_FOR_MODEL_CHARS)
+    context = _neutralize(redact_secrets(occ.context), CONTEXT_FOR_MODEL_CHARS)
     lang = re.sub(r"[^A-Za-z-]", "", occ.lang)[:12] or "unknown"
+    return attr, alt, lang, ", ".join(heur["signals"]), context
+
+
+def verdict_cache_key(g: Group, model: str) -> str:
+    """Hash of everything that determines the model's answer (B4).
+
+    image bytes + alt + the trimmed context/lang/signals actually sent + model +
+    prompt/schema fingerprint. No path, no key: safe to store.
+    """
+    assert g.image is not None
+    attr, alt, lang, signals, context = _image_payload(g.occurrences[0])
+    return sha256_hex(
+        PROMPT_FINGERPRINT,
+        model,
+        sha256_hex(g.image.data),
+        attr,
+        alt,
+        lang,
+        signals,
+        context,
+    )
+
+
+def _image_block(index: int, g: Group) -> list:
+    attr, alt, lang, signals, context = _image_payload(g.occurrences[0])
     assert g.image is not None
     return [
         f"[IMAGE index={index}]",
         MediaPart(g.image.data, g.image.mime),
         f'<current_alt present="{attr}">{alt}</current_alt>\n'
         f"<page_lang>{lang}</page_lang>\n"
-        f"<signals>{', '.join(heur['signals'])}</signals>\n"
+        f"<signals>{signals}</signals>\n"
         f"<html_context>{context}</html_context>",
     ]
 
@@ -385,8 +435,14 @@ def prepare(
     occurrences: Sequence[ImageOccurrence],
     loader: ImageLoader,
     max_images: int | None = None,
+    store: Store | None = None,
+    model: str = "",
 ) -> Prepared:
-    """Deterministic triage + loading, de-duplicating by (image, alt)."""
+    """Deterministic triage + loading + cache lookup, de-duplicating by (image, alt).
+
+    Cache hits are free: they set ``analysis`` and neither count against
+    ``max_images`` nor are sent.
+    """
     decided: dict[int, ImageOutcome] = {}
     groups: dict[tuple[str, str | None], Group] = {}
     all_keys: set[tuple[str, str | None]] = set()
@@ -407,7 +463,16 @@ def prepare(
             g.image = loader(g.occurrences[0])
         except ImageLoadError as e:
             g.failure = str(e)
+            g.transient = g.failure.startswith("could not download")
             continue
+        if store is not None and store.enabled:
+            g.cache_key = verdict_cache_key(g, model)
+            hit = store.get_verdict(g.cache_key)
+            if hit is not None:
+                g.analysis, g.from_cache = hit, True
+                store.hits += 1
+                continue
+            store.misses += 1
         if max_images is not None and len(to_send) >= max_images:
             g.skipped = f"--max-images limit reached ({max_images})"
             continue
@@ -421,6 +486,25 @@ def prepare(
     )
 
 
+def _unprocessed(occurrences, reason: str, reasons: list[str]) -> StageResult:
+    reasons.append(reason)
+    return StageResult(
+        outcomes=[_outcome(o, "skipped", reason=reason) for o in occurrences],
+        partial_reasons=reasons,
+        unique=len(occurrences),
+        skipped=len(occurrences),
+    )
+
+
+INTERRUPTED = "interrupted by the user (Ctrl+C)"
+_KIND_TEXT = {
+    "quota_daily": "daily API quota exhausted (not retried)",
+    "network": "the API could not be reached (network error)",
+    "timeout": "the API timed out",
+    "unavailable": "the API is unavailable (503)",
+}
+
+
 def analyze_images(
     occurrences: Sequence[ImageOccurrence],
     provider: LLMProvider,
@@ -432,20 +516,34 @@ def analyze_images(
     tokens_per_image: int = 1100,
     max_batch_bytes: int = MAX_BATCH_BYTES,
     progress: Callable[[str], None] | None = None,
+    store: Store | None = None,
+    model: str = "",
+    deadline: float | None = None,
 ) -> StageResult:
-    """Runs the stage: triage, load, batch, ask, validate, decide."""
-    prep = prepare(occurrences, loader, max_images)
+    """Runs the stage: triage, load, cache, batch, ask, validate, decide.
+
+    Never raises for Ctrl+C: it returns what is done (verdicts already cached)
+    with the rest ``skipped``. An invalid API key raises ``ProviderError``
+    (kind ``invalid_key``) immediately: nothing else is requested.
+    """
     reasons: list[str] = []
+    try:
+        prep = prepare(occurrences, loader, max_images, store, model)
+    except KeyboardInterrupt:
+        return _unprocessed(occurrences, INTERRUPTED, reasons)
     if any(g.skipped for g in prep.pending):
         reasons.append(f"--max-images limit reached ({max_images})")
 
     batches = make_batches(prep.to_send, batch_size, max_batch_bytes)
     consecutive_failures = 0
     stopped: str | None = None
+    writes_before = store.writes if store else 0
     for bi, batch in enumerate(batches, 1):
         if stopped is None:
             est_in, est_out = estimate_request_tokens(batch, tokens_per_image)
             stopped = tracker.stop_reason(est_in, est_out)
+            if stopped is None and deadline is not None and time.monotonic() > deadline:
+                stopped = "--scan-timeout reached"
             if stopped:
                 reasons.append(stopped)
         if stopped:
@@ -455,17 +553,32 @@ def analyze_images(
         if progress:
             progress(f"batch {bi}/{len(batches)}: {len(batch)} image(s)")
         tracker.batches += 1
-        failed = _run_batch(batch, provider, tracker, est_in, est_out)
+        try:
+            failed = _run_batch(batch, provider, tracker, est_in, est_out)
+        except KeyboardInterrupt:
+            # the batch in flight is dropped whole and retried on resume
+            stopped = INTERRUPTED
+            reasons.append(stopped)
+            for g in batch:
+                g.analysis, g.failure, g.skipped = None, None, stopped
+            continue
         if failed is None:
             consecutive_failures = 0
+            if store is not None:
+                for g in batch:
+                    if g.analysis is not None and g.cache_key:
+                        store.put_verdict(g.cache_key, g.analysis)
             continue
         kind, message = failed
+        if kind == "invalid_key":
+            raise ProviderError("invalid_key", message, tracker.requests)
         consecutive_failures += 1
         if kind in ("quota_daily", "attempt_limit") or consecutive_failures >= 2:
-            stopped = {
-                "quota_daily": "daily API quota exhausted (not retried)",
-                "attempt_limit": tracker.limits.requests_message(),
-            }.get(kind, f"provider failed repeatedly ({message})")
+            stopped = (
+                tracker.limits.requests_message()
+                if kind == "attempt_limit"
+                else _KIND_TEXT.get(kind, f"provider failed repeatedly ({message})")
+            )
             reasons.append(stopped)
             if kind in ("quota_daily", "attempt_limit"):
                 # not a verdict on the images: they were simply not processed
@@ -480,6 +593,12 @@ def analyze_images(
         by_template=prep.by_template,
         batches=tracker.batches,
     )
+    if store is not None and store.enabled:
+        result.cache_hits = sum(1 for g in prep.pending if g.from_cache)
+        result.cache_misses = sum(
+            1 for g in prep.pending if g.cache_key and not g.from_cache
+        )
+        result.cache_writes = store.writes - writes_before
     for g in prep.pending:
         if g.analysis is not None:
             result.verified += 1
@@ -494,7 +613,7 @@ def analyze_images(
                 decided[pos] = _outcome(occ, "skipped", reason=g.skipped)
             else:
                 decided[pos] = fallback_outcome(
-                    occ, g.failure or "no answer from the model"
+                    occ, g.failure or "no answer from the model", g.transient
                 )
     result.outcomes = [decided[i] for i in range(len(occurrences))]
     return result
@@ -518,7 +637,7 @@ def _run_batch(
     except ProviderError as e:
         tracker.record(e.attempts, None, est_in, est_out, success=False)
         for g in batch:
-            g.failure = f"provider error ({e.kind})"
+            g.failure, g.transient = f"provider error ({e.kind})", True
         return e.kind, str(e)
     tracker.record(res.attempts, res.usage, est_in, est_out)
     valid, error = parse_batch(res.text, len(batch))
@@ -545,6 +664,7 @@ def _run_batch(
                 tracker.record(e.attempts, None, sub_in, sub_out, success=False)
                 for g in sub:
                     g.failure = f"provider error ({e.kind}) on the corrective retry"
+                    g.transient = True
                 return e.kind, str(e)
             tracker.record(res2.attempts, res2.usage, sub_in, sub_out)
             valid2, _ = parse_batch(res2.text, len(sub))
@@ -553,4 +673,5 @@ def _run_batch(
         for g in sub:
             if g.analysis is None:
                 g.failure = "the model returned invalid JSON twice"
+                g.transient = True
     return None

@@ -158,3 +158,14 @@ def test_estimate_with_max_usd_and_no_prices_is_a_usage_error(
     monkeypatch.setenv("GEMINI_API_KEY", "k")
     assert cli.main(["estimate", str(tmp_path), "--max-usd", "1"]) == 2
     assert "price_input_per_mtok" in capsys.readouterr().err
+
+
+def test_estimate_discounts_cached_verdicts(tmp_path, no_model):
+    project(tmp_path, n=4, decorative=0, broken=0)
+    s = settings(tmp_path, batch_size=2)
+    before = estimate_scan(tmp_path, s)
+    assert before.requests_min == 2 and before.images_cached == 0
+    run_scan(tmp_path, s, scanners={"x": lambda h: []}, provider=FakeProvider())
+    after = estimate_scan(tmp_path, s)
+    assert after.images_cached == 4 and after.images_to_verify == 0
+    assert after.requests_min == 0 and after.requests_max == 0

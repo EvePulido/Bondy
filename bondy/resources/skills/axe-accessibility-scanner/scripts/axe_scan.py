@@ -9,13 +9,11 @@ import json
 import sys
 from pathlib import Path
 
-from playwright.sync_api import sync_playwright
-
 try:
-    from bondy.app_utils.browser import open_page
+    from bondy.app_utils.browser import open_page, playwright_context
 except ImportError:  # run as a standalone script: put the package root on sys.path
     sys.path.insert(0, str(Path(__file__).resolve().parents[5]))
-    from bondy.app_utils.browser import open_page
+    from bondy.app_utils.browser import open_page, playwright_context
 
 AXE_PATH = Path(__file__).parent / "axe.min.js"
 AXE_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa", "best-practice"]
@@ -98,7 +96,7 @@ def _unnamed_interactive_nodes(page) -> list[dict]:
 def scan(html: str) -> dict:
     axe_source = AXE_PATH.read_text(encoding="utf-8")
 
-    with sync_playwright() as p:
+    with playwright_context() as p:
         # open_page aborts every request except the temp file, data: and about:
         with open_page(p, html=html) as page:
             page.add_script_tag(content=axe_source)

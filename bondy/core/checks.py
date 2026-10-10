@@ -58,3 +58,8 @@ def all_criteria_instruction() -> str:
     """Sentence telling the agent which criteria to audit when none is chosen."""
     listed = ", ".join(f"WCAG {c}" for c in ALL_CRITERIA)
     return f"Audit all criteria ({listed})."
+
+
+# Value of <meta name="generator"> in Bondy's own HTML report: scans skip such
+# files so a report written inside the scanned folder is never audited.
+REPORT_GENERATOR = "bondy-report"

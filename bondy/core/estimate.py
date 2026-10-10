@@ -22,12 +22,13 @@ from bondy.core.budget import (
 )
 from bondy.core.images import LoadedImage, is_remote_src, load_image
 from bondy.core.models import ImageOccurrence
-from bondy.core.pipeline import collect_images
+from bondy.core.pipeline import collect_images, project_root
 from bondy.core.semantic import (
     estimate_request_tokens,
     make_batches,
     prepare,
 )
+from bondy.core.store import Store, resolve_cache_dir
 from bondy.scan import MAX_FILE_BYTES, discover
 
 # Worst case per batch: the first answer is invalid and ONE corrective retry
@@ -54,6 +55,7 @@ class Estimate:
     images_remote: int = 0  # assumed loadable (not downloaded to estimate)
     images_to_verify: int = 0
     images_over_limit: int = 0  # cut by --max-images
+    images_cached: int = 0  # already answered in the verdict cache: free
     batch_size: int = 0
     batches: int = 0
     requests_min: int = 0
@@ -122,13 +124,27 @@ def estimate_scan(target: Path | str, settings: Settings) -> Estimate:
     ]
     occurrences = collect_images(results, target)
     est.images_found = len(occurrences)
-    prep = prepare(
-        occurrences, _make_loader(settings.remote_images), settings.max_images
+    store = Store(
+        resolve_cache_dir(settings.cache_dir, project_root(target)),
+        enabled=settings.cache,
     )
+    prep = prepare(
+        occurrences,
+        _make_loader(settings.remote_images),
+        settings.max_images,
+        store,
+        settings.vision_model,
+    )
+    est.images_cached = sum(1 for g in prep.pending if g.from_cache)
     est.images_unique = prep.unique
     est.images_by_template = prep.by_template
     est.images_unloadable = sum(1 for g in prep.pending if g.failure)
     est.images_over_limit = sum(1 for g in prep.pending if g.skipped)
+    if est.images_cached:
+        est.notes.append(
+            f"{est.images_cached} unique image(s) are already in the verdict "
+            "cache and cost no request."
+        )
     est.images_to_verify = len(prep.to_send)
     est.images_remote = sum(
         1 for g in prep.to_send if is_remote_src(g.occurrences[0].src)

@@ -5,7 +5,7 @@ from __future__ import annotations
 import html
 import re
 
-from bondy.app_utils.vision_tools import GENERIC_ALT, REDUNDANT_PREFIX
+from bondy.core.alt_rules import GENERIC_ALT, REDUNDANT_PREFIX
 from bondy.core.models import ImageFix, ImageOccurrence, ImageOutcome
 
 _ALT_ATTR = re.compile(r"""(?<![\w:-])alt\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)""", re.I)

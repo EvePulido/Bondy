@@ -1,0 +1,34 @@
+# Example GitHub Actions workflow for Bondy. It is NOT active: copy it to
+# .github/workflows/accessibility.yml in the repository you want to scan.
+#
+# TODO(verify): `uses: ./` below assumes this file lives in the Bondy repository
+# itself. In another repository use `<owner>/Bondy@<tag or commit>` once Bondy
+# publishes the action; that coordinate does not exist yet.
+name: Accessibility
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  security-events: write # required by upload-sarif
+
+jobs:
+  bondy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # needed by `since`
+
+      - uses: ./ # TODO(verify): see the note above
+        with:
+          path: site
+          fail-on: critical
+          baseline: bondy-baseline.json # create it with `bondy baseline create site`
+          since: origin/main # PRs: only files changed against main
+          # BYOK: store your key as a repository secret. Leave it out to run the
+          # deterministic scanners only.
+          gemini-api-key: ${{ secrets.GEMINI_API_KEY }}

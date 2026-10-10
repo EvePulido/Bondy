@@ -185,6 +185,7 @@ flowchart TD
 ```bash
 bondy --version
 bondy doctor                              # checks Python, Chromium, axe-core, config, API key (offline)
+bondy doctor --check-key                  # + validates the key with 1 minimal request
 bondy scan ./my-site --no-llm             # deterministic scanners on a file or folder
 bondy scan page.html --format json --fail-on warning
 ```
@@ -205,7 +206,11 @@ Hard limits (`--max-requests`, `--max-usd`, `--max-pages`, `--max-images`; also 
 
 Images in the HTML are sent to the provider: local files inside the project root, and public http(s) images, which Bondy downloads (public hosts only, redirects re-checked). Use `--no-remote-images` (`remote_images = false`, `BONDY_REMOTE_IMAGES=0`) to skip downloading remote images; they then go to manual review. The free tier of the Gemini API may use content to improve Google products.
 
-**Configuration precedence: flag > environment variable > `bondy.toml` > default.** `bondy.toml` is searched upward from the current directory (or pass `--config`). Keys: `model`, `vision_model`, `fallback_model`, `no_llm`, `static`, `format` (`terminal`|`json`), `fail_on` (`critical`|`warning`|`never`), `checks`, `include`, `exclude`, `batch_size`, `max_requests`, `max_usd`, `max_pages`, `max_images`, `price_input_per_mtok`, `price_output_per_mtok`, `tokens_per_image`, `remote_images`. Each key has an environment variable (`BONDY_MODEL`, `BONDY_VISION_MODEL`, `BONDY_FALLBACK_MODEL`, `BONDY_NO_LLM`, `BONDY_FORMAT`, `BONDY_FAIL_ON`, `BONDY_CHECKS`, `BONDY_INCLUDE`, `BONDY_EXCLUDE`, `BONDY_BATCH_SIZE`, `BONDY_MAX_REQUESTS`, `BONDY_MAX_USD`, `BONDY_MAX_PAGES`, `BONDY_MAX_IMAGES`, `BONDY_PRICE_INPUT_PER_MTOK`, `BONDY_PRICE_OUTPUT_PER_MTOK`, `BONDY_TOKENS_PER_IMAGE`, `BONDY_REMOTE_IMAGES`; lists are comma-separated).
+**Cache, incremental scans and resuming.** When something needs it (a scan that uses the model, `--changed-only`, `--since` or `--resume`), Bondy keeps a small cache under `<scanned folder>/.bondy/cache` and puts a `.gitignore` containing `*` inside `.bondy/` so it never shows up in your `git status`. A plain deterministic scan (`bondy scan --no-llm`) writes nothing into the scanned folder. The cache holds: one model verdict per image (key = image bytes + alt + the context sent + model + prompt/schema version), the result of each finished page and a marker when a scan was cut short. Consequences: re-scanning an unchanged project makes **0 requests**; `bondy scan --changed-only` also skips unchanged pages entirely (HTML and local images hashed) and marks them `reused`; `--since <git-ref>` scans only files changed vs a ref and reuses the saved result (same content hash and configuration) for the untouched ones; those without a valid saved result are listed as `skipped`, not as a partial result. If the scan stops (daily quota, `--max-*`, `--scan-timeout`, Ctrl+C: it exits with code 3 and saves what is done) run it again with `--resume` and finished work is not repeated. `--no-cache` disables all of it (`cache = false`), `--cache-dir` moves it, `--clear-cache` / `bondy cache clear` empties it (only Bondy's own files). Entries contain no API key or absolute paths. Remote images are identified by URL for page reuse, so a remote image that changes under the same URL is not detected by `--changed-only`.
+
+`bondy doctor --check-key` validates your API key with one minimal request (opt-in; plain `doctor` stays offline) and tells a rejected key from an exhausted quota or no network. `scan` stops immediately (exit 2, no retries) if the first batch shows the key is invalid; a fully cached scan needs no key. Scanners share one browser per scan; `--timeout` (seconds per page, default 60) and `--scan-timeout` (default 900) bound the work, `0` = no limit. Known limit: a page whose JavaScript starts spinning *after* load can block `--timeout` until the browser closes the tab (about 85 s measured), because `--scan-timeout` is checked between pages, scanners and batches, not inside a blocked evaluation. If that happens, use `--scan-timeout` and `--resume` to continue without repeating finished work.
+
+**Configuration precedence: flag > environment variable > `bondy.toml` > default.** `bondy.toml` is searched upward from the current directory (or pass `--config`). Keys: `model`, `vision_model`, `fallback_model`, `no_llm`, `static`, `format` (`terminal`|`json`|`markdown`|`html`|`sarif`), `fail_on` (`critical`|`warning`|`never`), `checks`, `include`, `exclude`, `batch_size`, `max_requests`, `max_usd`, `max_pages`, `max_images`, `price_input_per_mtok`, `price_output_per_mtok`, `tokens_per_image`, `remote_images`, `cache`, `cache_dir`, `timeout`, `scan_timeout`, `baseline`, and `[[ignore]]` tables (file only). Each key has an environment variable (`BONDY_MODEL`, `BONDY_VISION_MODEL`, `BONDY_FALLBACK_MODEL`, `BONDY_NO_LLM`, `BONDY_FORMAT`, `BONDY_FAIL_ON`, `BONDY_CHECKS`, `BONDY_INCLUDE`, `BONDY_EXCLUDE`, `BONDY_BATCH_SIZE`, `BONDY_MAX_REQUESTS`, `BONDY_MAX_USD`, `BONDY_MAX_PAGES`, `BONDY_MAX_IMAGES`, `BONDY_PRICE_INPUT_PER_MTOK`, `BONDY_PRICE_OUTPUT_PER_MTOK`, `BONDY_TOKENS_PER_IMAGE`, `BONDY_REMOTE_IMAGES`, `BONDY_CACHE`, `BONDY_CACHE_DIR`, `BONDY_TIMEOUT`, `BONDY_SCAN_TIMEOUT`, `BONDY_BASELINE`; lists are comma-separated).
 
 ```toml
 # bondy.toml
@@ -215,6 +220,42 @@ exclude = ["node_modules/**", "dist/**"]
 ```
 
 The API key is read from `GEMINI_API_KEY` (first) or `GOOGLE_API_KEY`; it is intentionally **not** accepted in `bondy.toml` because that file is meant to be committed. Variables already set in your shell are never overwritten by `.env`.
+
+### 2c. Reports, baselines, suppressions and CI
+
+```bash
+bondy scan ./site --format markdown --output report.md   # terminal | json | markdown | html | sarif
+bondy scan ./site --format sarif --output bondy.sarif    # SARIF 2.1.0 for GitHub code scanning
+bondy baseline create ./site -o bondy-baseline.json      # accept today's findings
+bondy scan ./site --baseline bondy-baseline.json         # only NEW findings fail
+```
+
+**Formats.** All of them are rendered from one internal report. Paths are always relative to the scanned folder with `/` separators (never your absolute paths). `html` is a single self-contained file (inline CSS, no JavaScript, no remote resources, landmarks, `lang`, AA contrast, a restrictive CSP). Everything that comes from the scanned project (HTML, alt text, selectors, paths) is treated as untrusted data and escaped for the target format. `--output FILE` writes the report there and still prints the terminal summary. The exit code does not depend on the format. In SARIF each result carries a stable `partialFingerprints` value; GitHub resolves paths from the repository root, so when you scan a sub-folder pass `--sarif-prefix <folder relative to the repo root>` (the bundled action does it for you). Baselined and suppressed findings are not emitted as SARIF results (GitHub code scanning does not document support for `suppressions`/`baselineState`); their counts are in `runs[].properties.bondy`.
+
+**Baseline.** A finding's fingerprint is rule + path relative to the scanned folder + normalized selector or HTML fragment, never a line number, so moving code around does not resurrect old findings. `--baseline FILE` (also `baseline` in `bondy.toml`, relative to that file, or `BONDY_BASELINE`) hides known findings, reports how many were hidden and how many were **resolved** (so you can regenerate a smaller baseline) and only new findings count for the exit code. A corrupt, unknown-version or missing baseline is a usage error (exit 2) detected before anything is scanned or spent. `baseline create` refuses to write when the scan had errors or is partial. Create the baseline in the same mode you run in CI (browser vs static, with or without the model): findings of checks that did not run are reported as "not re-evaluated", not as resolved.
+
+**Suppressions (always with a reason).**
+
+```html
+<!-- bondy-ignore: image-alt, 1.4.3 -- decorative logo, the text is adjacent -->
+<img src="logo.png">
+```
+
+```toml
+# bondy.toml
+[[ignore]]
+path = "legacy/**"          # glob relative to the scanned folder; no absolute paths, no ".."
+rule = "color-contrast"     # a rule id (axe rule or Bondy check) or a WCAG criterion such as "1.4.3"
+reason = "legacy pages are retired in Q3"
+```
+
+The comment applies to the next element (a comment before `<html>` applies to page-level findings such as a missing `lang`). Identical elements are indistinguishable and are suppressed together; findings that Bondy cannot tie to one element are never suppressed by a comment (use `[[ignore]]`). A missing reason, an unparsable rule or a path that leaves the folder is a usage error (exit 2). Every report lists the applied suppressions with their reason and warns about **obsolete** ones (matching nothing); an unknown-but-well-formed rule name shows up as obsolete, because the axe rule list is not enumerable offline.
+
+**Secret redaction.** Before the HTML context and alt text are sent to the model (and before they are hashed into the verdict cache, so secrets never reach `.bondy/`), Bondy replaces secret-looking values with `[REDACTED]`: `AIza...`, `sk-...`, `ghp_...`, `AKIA...`, `Bearer`/JWT tokens, PEM private keys, `api_key=`/`token=`/`password=`-style assignments and URLs with credentials or `?token=`/`?key=`. Report snippets are redacted the same way, and a page whose findings quote secret-like text is not saved for `--changed-only` reuse. Files such as `.env`, `*.pem` or `id_rsa` are never loaded as images. This is **pattern matching, not a guarantee**: unusual formats, secrets inside image pixels or split by the context window are not caught; do not scan code you may not share with your provider.
+
+**Summary and next step.** Every run ends with new findings by severity, how many were hidden by the baseline or suppressed, pages scanned/reused/skipped, the model usage and a concrete next step; the JSON has the same numbers under `summary`.
+
+**CI.** `action.yml` is a composite GitHub Action (inputs `path`, `fail-on`, `format`, `baseline`, `changed-only`, `since`, `gemini-api-key`, ...) that installs Bondy, scans and uploads the SARIF with `github/codeql-action/upload-sarif` pinned to a commit. `.pre-commit-hooks.yaml` defines a `bondy` hook that scans only the HTML changed against `HEAD`, offline and without writing a cache. A ready-to-copy, inactive workflow is in `docs/ci-example.yml`.
 
 ### 3. Run the API and Web UI Locally
 Launch the built-in FastAPI server to access the Bondy Web UI:
@@ -274,6 +315,8 @@ All tools follow the project's security rules (`.agents/AGENTS.md`):
 
 - **Path guardrail:** only files inside `demo_sites/` or raw HTML are audited; traversal and absolute paths are rejected (`bondy/app_utils/security.py`).
 - **SSRF guard:** remote image/page URLs must resolve to public IPs; loopback, private and metadata addresses are blocked (`validate_public_url`). The axe scanner aborts every non-local network request made by the audited page.
+- **Secret redaction:** secret-looking values are replaced with `[REDACTED]` before text reaches the model, the cache or a report (best effort, not a guarantee).
+- **Untrusted output:** scanned HTML, alt text and paths are escaped in every report format (HTML, Markdown, SARIF, terminal).
 - **Write protection:** `POST /api/apply-fix` accepts only localhost, or a valid `X-API-Key` when `BONDY_API_KEY` is set, and refuses ambiguous replacements.
 
 ## Contributors

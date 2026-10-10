@@ -218,3 +218,30 @@ def test_content_that_looks_like_a_url_is_never_navigated(server, need_browser):
     f = _load("focus-order-validator", "focus_order.py")
     f.evaluate_focus_order(base + "/secret")
     assert hits == []
+
+
+def test_shared_session_keeps_the_guard_and_launches_one_browser(
+    server, need_browser, monkeypatch
+):
+    """All four browser scanners in ONE browser: still 0 requests to the server."""
+    base, hits = server
+    launches = []
+    real = bw.launch_with_label
+
+    def counting(p):
+        launches.append(1)
+        return real(p)
+
+    monkeypatch.setattr(bw, "launch_with_label", counting)
+    mods = [
+        (_load("axe-accessibility-scanner", "axe_scan.py"), "scan"),
+        (_load("text-contrast-calculator", "contrast.py"), "check_contrast_in_page"),
+        (_load("focus-trap-detector", "focus_trap.py"), "detect_focus_trap"),
+        (_load("focus-order-validator", "focus_order.py"), "evaluate_focus_order"),
+    ]
+    with bw.browser_session(page_timeout=30) as session:
+        for _ in range(2):  # two pages x four scanners
+            for mod, fn in mods:
+                assert getattr(mod, fn)(_hostile_html(base))
+    assert hits == []
+    assert len(launches) == 1 and session.launches == 1

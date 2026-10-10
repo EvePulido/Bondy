@@ -2,13 +2,11 @@ import json
 import sys
 from pathlib import Path
 
-from playwright.sync_api import sync_playwright
-
 try:
-    from bondy.app_utils.browser import open_page
+    from bondy.app_utils.browser import open_page, playwright_context
 except ImportError:  # run as a standalone script: put the package root on sys.path
     sys.path.insert(0, str(Path(__file__).resolve().parents[5]))
-    from bondy.app_utils.browser import open_page
+    from bondy.app_utils.browser import open_page, playwright_context
 
 
 def detect_focus_trap(content: str) -> dict:
@@ -16,7 +14,7 @@ def detect_focus_trap(content: str) -> dict:
     Simulates tab navigation using Playwright to detect if focus becomes
     trapped within a subset of elements (modal dialog, dropdown menu, etc.).
     """
-    with sync_playwright() as p:
+    with playwright_context() as p:
         # open_page aborts every request except the temp file, data: and about:
         with open_page(p, html=content) as page:
             focus_sequence = []

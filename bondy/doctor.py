@@ -1,7 +1,7 @@
 """`bondy doctor`: offline environment checks with the exact command to fix each.
 
 Nothing here calls the network or the Gemini API. A live API-key validation
-(one minimal request) is intentionally not part of this module yet.
+(one minimal request) exists only behind ``--check-key``.
 """
 
 from __future__ import annotations
@@ -157,7 +157,71 @@ def check_config(config_path: str | None = None) -> Check:
     return Check("config", "ok", where)
 
 
-def run_checks(config_path: str | None = None) -> list[Check]:
+def check_key_live(config_path: str | None = None, provider=None) -> Check:
+    """ONE minimal request to the API. Opt-in: it spends a request.
+
+    Tells apart a rejected key, an exhausted quota and an unreachable network.
+    The key is never printed (errors are redacted by the provider).
+    """
+    from bondy.core.providers.base import ProviderError
+
+    name = "api-key (live)"
+    try:
+        settings = load_settings(config_path=config_path)
+    except ConfigError as e:
+        return Check(name, "fail", str(e), "Fix bondy.toml first")
+    if provider is None:
+        if not settings.api_key:
+            return Check(
+                name,
+                "fail",
+                "No API key to validate",
+                "Set GEMINI_API_KEY (https://aistudio.google.com/apikey)",
+            )
+        from bondy.core.providers.gemini import GeminiProvider
+
+        provider = GeminiProvider.from_settings(settings)
+    try:
+        provider.check_key()
+    except ProviderError as e:
+        if e.kind == "invalid_key":
+            return Check(
+                name,
+                "fail",
+                "The API rejected the key (invalid, expired or without permission)",
+                "Create a new key at https://aistudio.google.com/apikey",
+            )
+        if e.kind in ("quota_daily", "rate_limit"):
+            when = "per day" if e.kind == "quota_daily" else "per minute"
+            return Check(
+                name,
+                "warn",
+                f"The key is accepted but the quota is exhausted ({when})",
+                "Wait for the quota to reset or use a key with billing enabled",
+            )
+        if e.kind in ("network", "timeout"):
+            return Check(
+                name,
+                "warn",
+                "Could not reach the API (network error or timeout); the key "
+                "could not be validated",
+                "Check your internet connection/proxy and retry",
+            )
+        return Check(name, "warn", f"Unexpected API answer ({e.kind}): {e}")
+    return Check(name, "ok", "The API accepted the key (1 request used)")
+
+
+def run_checks(
+    config_path: str | None = None, check_key: bool = False, provider=None
+) -> list[Check]:
+    extra = [check_key_live(config_path, provider)] if check_key else []
+    return [
+        *_offline_checks(config_path),
+        *extra,
+    ]
+
+
+def _offline_checks(config_path: str | None = None) -> list[Check]:
     return [
         check_python(),
         check_playwright_package(),

@@ -82,6 +82,7 @@ class GeminiProvider(RetryingProvider):
         ]
         config = types.GenerateContentConfig(
             temperature=0,
+            max_output_tokens=request.max_output_tokens,
             response_mime_type="application/json" if request.schema else None,
             response_schema=request.schema,
         )

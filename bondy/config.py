@@ -13,6 +13,7 @@ meant to be committed to the repository. It comes from ``GEMINI_API_KEY`` or
 from __future__ import annotations
 
 import os
+import re
 import tomllib
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -99,6 +100,84 @@ def _choice(*options: str):
     return convert
 
 
+_RULE_TOKEN = re.compile(r"^(?:(?:wcag\s*)?(\d\.\d\.\d{1,2})|([a-z][a-z0-9_-]*))$", re.I)
+
+
+def normalize_rule_token(token: str, where: str) -> str:
+    """``"WCAG 1.4.3"`` -> ``"1.4.3"``; ``"Color-Contrast"`` -> ``"color-contrast"``."""
+    m = _RULE_TOKEN.match(token.strip())
+    if not m:
+        raise ConfigError(
+            f"{where}: {token!r} is not a rule id (e.g. image-alt) or a WCAG "
+            "criterion (e.g. 1.4.3)."
+        )
+    return (m.group(1) or m.group(2)).lower()
+
+
+@dataclass(frozen=True)
+class IgnoreRule:
+    """One ``[[ignore]]`` entry of bondy.toml. ``path`` is a glob relative to
+    the scanned folder (never absolute, never leaving it)."""
+
+    path: str
+    rule: str
+    reason: str
+    index: int = 0
+
+
+def _ignore_path(value: Any, where: str) -> str:
+    text = _to_str(value, where).strip().replace("\\", "/")
+    parts = text.split("/")
+    if (
+        not text
+        or text.startswith(("/", "~"))
+        or re.match(r"^[A-Za-z]:", text)
+        or ".." in parts
+        or "\x00" in text
+    ):
+        raise ConfigError(
+            f"{where}: path {value!r} must be a glob relative to the scanned "
+            "folder (no absolute paths, '~' or '..')."
+        )
+    return text
+
+
+def _to_ignore_list(value: Any, where: str) -> tuple[IgnoreRule, ...]:
+    if not isinstance(value, list | tuple):
+        raise ConfigError(f"{where}: expected a list of [[ignore]] tables.")
+    out = []
+    for n, entry in enumerate(value, 1):
+        label = f"{where} [[ignore]] #{n}"
+        if not isinstance(entry, dict):
+            raise ConfigError(f"{label}: expected a table with path, rule, reason.")
+        unknown = sorted(set(entry) - {"path", "rule", "reason"})
+        if unknown:
+            raise ConfigError(
+                f"{label}: unknown key(s): {', '.join(unknown)}. Valid keys: "
+                "path, rule, reason."
+            )
+        missing = [k for k in ("path", "rule", "reason") if k not in entry]
+        if missing:
+            raise ConfigError(f"{label}: missing {', '.join(missing)}.")
+        reason = _to_str(entry["reason"], f"{label} reason").strip()
+        if not reason:
+            raise ConfigError(
+                f"{label}: 'reason' must say why this is ignored (it is shown "
+                "in every report)."
+            )
+        out.append(
+            IgnoreRule(
+                path=_ignore_path(entry["path"], f"{label} path"),
+                rule=normalize_rule_token(
+                    _to_str(entry["rule"], f"{label} rule"), f"{label} rule"
+                ),
+                reason=reason,
+                index=n,
+            )
+        )
+    return tuple(out)
+
+
 # field -> (converter, environment variable or None, default)
 _FIELDS: dict[str, tuple[Any, str | None, Any]] = {
     "model": (_to_str, "BONDY_MODEL", "gemini-flash-latest"),
@@ -108,7 +187,11 @@ _FIELDS: dict[str, tuple[Any, str | None, Any]] = {
     "no_llm": (_to_bool, "BONDY_NO_LLM", False),
     # Force browser-free (static) mode, e.g. in CI without a browser.
     "static": (_to_bool, "BONDY_STATIC", False),
-    "format": (_choice("terminal", "json"), "BONDY_FORMAT", "terminal"),
+    "format": (
+        _choice("terminal", "json", "markdown", "html", "sarif"),
+        "BONDY_FORMAT",
+        "terminal",
+    ),
     "fail_on": (_choice("critical", "warning", "never"), "BONDY_FAIL_ON", "critical"),
     "checks": (_to_str_list, "BONDY_CHECKS", []),
     "include": (_to_str_list, "BONDY_INCLUDE", ["**/*.html", "**/*.htm"]),
@@ -142,6 +225,23 @@ _FIELDS: dict[str, tuple[Any, str | None, Any]] = {
         "BONDY_PRICE_OUTPUT_PER_MTOK",
         None,
     ),
+    # Persistent cache/state (verdicts, page results, resume marker). Relative
+    # cache_dir is resolved against the scanned project root; "" = .bondy/cache.
+    "cache": (_to_bool, "BONDY_CACHE", True),
+    "cache_dir": (_to_str, "BONDY_CACHE_DIR", ""),
+    # Seconds; 0 = no limit. timeout is per page (browser work), scan_timeout is
+    # for the whole scan (checked between pages/scanners/batches).
+    "timeout": (_number(float, minimum=0, optional=True), "BONDY_TIMEOUT", 60.0),
+    "scan_timeout": (
+        _number(float, minimum=0, optional=True),
+        "BONDY_SCAN_TIMEOUT",
+        900.0,
+    ),
+    # Suppressions with a mandatory reason: [[ignore]] tables (file only).
+    "ignore": (_to_ignore_list, None, ()),
+    # Baseline file (E2). From bondy.toml it is relative to that file's folder;
+    # from a flag or the environment, relative to the working directory.
+    "baseline": (_to_str, "BONDY_BASELINE", ""),
     # Download http(s) images (public hosts only) so the model can see them.
     "remote_images": (_to_bool, "BONDY_REMOTE_IMAGES", True),
     # Rough input tokens one image costs (used only by estimate/dry-run and the
@@ -172,7 +272,13 @@ class Settings:
     price_input_per_mtok: float | None
     price_output_per_mtok: float | None
     remote_images: bool
+    cache: bool
+    cache_dir: str
+    timeout: float | None
+    scan_timeout: float | None
     tokens_per_image: int
+    baseline: str
+    ignore: tuple[IgnoreRule, ...]
     api_key: str | None = field(default=None, repr=False)  # never printed
     sources: dict[str, str] = field(default_factory=dict)
     config_path: Path | None = None
@@ -280,5 +386,11 @@ def load_settings(
     else:
         api_key = resolve_api_key(env)
         sources["api_key"] = "env" if api_key else "unset"
+
+    baseline = values["baseline"]
+    if baseline and sources["baseline"] == "file" and path is not None:
+        candidate = Path(baseline).expanduser()
+        if not candidate.is_absolute():
+            values["baseline"] = str(path.resolve().parent / candidate)
 
     return Settings(api_key=api_key, sources=sources, config_path=path, **values)

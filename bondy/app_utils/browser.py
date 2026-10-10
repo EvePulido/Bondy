@@ -10,6 +10,11 @@ through ``open_page`` so that:
   Remote content is never fetched, so a hostile HTML cannot be used for SSRF or
   to leak the scan.
 
+A scan can share ONE browser (``browser_session``): every ``open_page`` inside
+it gets a fresh, isolated context of that browser with the same network guard
+and per-page timeouts, and the browser is always closed on exit (error or
+Ctrl+C included). Outside a session each ``open_page`` launches its own.
+
 This module only imports Playwright lazily and never ADK / FastAPI / Gemini.
 """
 
@@ -19,6 +24,7 @@ import os
 import re
 import shutil
 import tempfile
+import threading
 from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -177,6 +183,93 @@ def install_network_guard(
     context.route("**/*", handle)
 
 
+class BrowserSession:
+    """One lazily started Playwright driver + browser shared by a whole scan.
+
+    Starting is lazy so a scan that never needs a browser (static mode, cached
+    pages) never launches one. A failed start is remembered and re-raised, so
+    later scanners do not retry the launch.
+    """
+
+    def __init__(self, page_timeout: float | None = None):
+        # seconds; None = Playwright's default (30 s); 0 = no timeout
+        self.page_timeout = page_timeout
+        self.label: str | None = None
+        self._pw: Any = None
+        self._browser: Any = None
+        self._error: BrowserUnavailableError | None = None
+        self.launches = 0
+
+    def browser(self) -> Any:
+        if self._error is not None:
+            raise self._error
+        if self._browser is not None:
+            try:
+                if self._browser.is_connected():
+                    return self._browser
+            except Exception:
+                pass
+            self._browser = None  # crashed: start a new one
+        try:
+            if self._pw is None:
+                from playwright.sync_api import sync_playwright
+
+                self._pw = sync_playwright().start()
+            self._browser, self.label = launch_with_label(self._pw)
+            self.launches += 1
+        except BrowserUnavailableError as e:
+            self._error = e
+            self.close()
+            raise
+        return self._browser
+
+    def close(self) -> None:
+        browser, pw = self._browser, self._pw
+        self._browser = self._pw = None
+        for closer in (browser and browser.close, pw and pw.stop):
+            if closer:
+                try:
+                    closer()
+                except Exception:
+                    pass
+
+
+# per thread: two scans in one process (library use) never share a session
+_STATE = threading.local()
+
+
+def _active() -> BrowserSession | None:
+    return getattr(_STATE, "session", None)
+
+
+@contextmanager
+def browser_session(page_timeout: float | None = None) -> Iterator[BrowserSession]:
+    """Shares one browser among every ``open_page`` call made inside the block."""
+    previous, session = _active(), BrowserSession(page_timeout)
+    _STATE.session = session
+    try:
+        yield session
+    finally:
+        _STATE.session = previous
+        session.close()
+
+
+@contextmanager
+def playwright_context() -> Iterator[Any]:
+    """What scanner scripts use instead of ``sync_playwright()``.
+
+    Inside a ``browser_session`` it yields None (the session owns the driver and
+    ``open_page`` ignores the argument); otherwise a real Playwright instance.
+    """
+    if _active() is not None:
+        yield None
+        return
+    from playwright.sync_api import sync_playwright
+
+    with sync_playwright() as p:
+        yield p
+
+
 @contextmanager
 def open_page(
     playwright: Any,
@@ -190,9 +283,11 @@ def open_page(
 ) -> Iterator[Any]:
     """Yields a Playwright page already navigated to ``html`` or ``path``.
 
-    ``html`` is written to a temp file (removed on exit). The browser is always
-    closed, and the page can only load the file itself, ``allowed_dirs`` and
-    whatever ``allow_remote`` accepts.
+    ``html`` is written to a temp file (removed on exit). The page can only load
+    the file itself, ``allowed_dirs`` and whatever ``allow_remote`` accepts. With
+    an active ``browser_session`` the page lives in a throwaway context of the
+    shared browser (closed on exit); otherwise a browser is launched from
+    ``playwright`` and always closed.
     """
     if (html is None) == (path is None):
         raise ValueError("Pass exactly one of html or path")
@@ -205,19 +300,39 @@ def open_page(
     else:
         target = Path(str(path)).resolve()
 
+    session = _active()
     browser = None
+    context = None
     try:
-        browser = launch_browser(playwright)
+        if session is not None:
+            browser = session.browser()
+        else:
+            browser = launch_browser(playwright)
         ctx_kwargs: dict[str, Any] = {"accept_downloads": False}
         if viewport:
             ctx_kwargs["viewport"] = viewport
-        context = browser.new_context(service_workers="block", **ctx_kwargs)
+        # bypass_csp: the page's own Content-Security-Policy must not block the
+        # scanner's injected scripts (axe). It does not open the network: the
+        # route guard installed below still aborts every non-local request.
+        context = browser.new_context(
+            service_workers="block", bypass_csp=True, **ctx_kwargs
+        )
+        if session is not None and session.page_timeout is not None:
+            ms = int(session.page_timeout * 1000)
+            context.set_default_timeout(ms)
+            context.set_default_navigation_timeout(ms)
         install_network_guard(context, [target], allowed_dirs, allow_remote)
         page = context.new_page()
         page.goto(target.as_uri(), **(goto_kwargs or {}))
         yield page
     finally:
-        if browser is not None:
+        if session is not None:
+            if context is not None:
+                try:
+                    context.close()
+                except Exception:
+                    pass
+        elif browser is not None:
             try:
                 browser.close()
             except Exception:

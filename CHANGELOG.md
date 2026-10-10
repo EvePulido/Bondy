@@ -37,7 +37,30 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 - `bondy/core/checks.py`: fuente única de checks y mapeo WCAG.
 - Tests `test_pipeline.py`, `test_providers.py`, `test_semantic.py`, `test_limits.py`, `test_estimate.py` (sin red ni cuota).
 
+- Caché de veredictos (B4) en `.bondy/cache/verdicts/`: clave = bytes de la imagen + alt + contexto enviado + modelo + huella del prompt/esquema; escritura atómica; entradas corruptas = miss; sin key ni rutas absolutas. Un segundo escaneo idéntico hace 0 peticiones. Flags `--no-cache`, `--clear-cache`, `--cache-dir`, comando `bondy cache clear [--keep-state]`; ajustes `cache`, `cache_dir` (`BONDY_CACHE`, `BONDY_CACHE_DIR`). El resumen de uso muestra aciertos/fallos de caché.
+- Escaneo incremental (B9): `--changed-only` reutiliza el resultado de las páginas cuyo HTML e imágenes locales no cambiaron (invalida al cambiar versión de Bondy, checks, modelo, escáneres o prompt) y marca `reused` en el reporte; `--since <git-ref>` escanea solo lo cambiado y reutiliza el resultado guardado (mismo hash y configuración) de las demás páginas.
+- Reanudación (B10): cuota diaria, topes, `--scan-timeout` y Ctrl+C dejan `resume.json` y el trabajo ya hecho; `--resume` continúa sin repetir peticiones. Ctrl+C termina con gracia y exit 3.
+- `bondy doctor --check-key`: valida la key con 1 petición mínima (opt-in); distingue key rechazada, cuota y red. En `scan`, una key inválida aborta en el primer lote con exit 2, sin reintentos (`ErrorKind` `invalid_key`, `network`).
+- Navegador compartido (`browser_session`) con `--timeout` por página (def. 60 s) y `--scan-timeout` (def. 900 s; ajustes `timeout`, `scan_timeout`); cierre garantizado también con error o Ctrl+C.
+- `bondy/core/alt_rules.py`: reglas de grounding, heurísticas y `quota_retry_delay` compartidas; `vision_tools` (modo agente) las importa de ahí.
+- Tests `test_cache.py`, `test_incremental.py`, `test_resume.py`, `test_apikey.py`, `test_browser_session.py`, `test_shared_rules.py`.
+
+- Formatos de reporte (E1): `--format terminal|json|markdown|html|sarif` y `--output FILE`; un único modelo interno (`bondy/core/report.py`) del que salen todos (`bondy/core/formats.py`). HTML autocontenido y accesible (sin JS ni recursos remotos, CSP), SARIF 2.1.0 (validado contra el esquema oficial de OASIS), Markdown con escape. Todo contenido del proyecto escaneado se escapa por formato y la terminal descarta caracteres de control. `--sarif-prefix` para escanear subcarpetas del repositorio.
+- Baseline (E2): `bondy baseline create <ruta> [-o archivo]` y `scan --baseline` (`baseline` en `bondy.toml`, `BONDY_BASELINE`): huella = regla + ruta relativa + selector/fragmento normalizado (sin línea); solo los hallazgos nuevos cuentan para el exit code; informa ocultos y resueltos; archivo corrupto, de otra versión o inexistente = exit 2 antes de escanear.
+- Supresiones versionables (E4): `<!-- bondy-ignore: <regla|wcag> -- <motivo> -->` y `[[ignore]]` (`path`, `rule`, `reason`) en `bondy.toml`; el motivo es obligatorio (exit 2 si falta); el reporte lista las aplicadas con su motivo y avisa de las obsoletas; globs absolutos o con `..` se rechazan.
+- Redacción de secretos (D3, `bondy/core/redact.py`): claves/tokens/JWT/PEM, asignaciones `api_key=`/`token=`/`password=` y URLs con credenciales o `?token=` pasan a `[REDACTED]` antes de enviarse al modelo, antes de calcular la clave de la caché y en los snippets de los reportes; las páginas cuyos hallazgos citan secretos no se guardan para reutilización; `.env`, `*.pem`, `id_rsa`... nunca se cargan como imagen. Es una detección por patrones, no una garantía.
+- Integraciones CI (E3): `action.yml` (composite; instala Bondy, escanea y sube SARIF con `github/codeql-action/upload-sarif` fijado por SHA), `.pre-commit-hooks.yaml` (solo HTML cambiado respecto a HEAD, offline) y `docs/ci-example.yml` (no activo).
+- Resumen final (E5): nuevos por severidad, ocultos por baseline, suprimidos, resueltos, páginas escaneadas/reutilizadas/omitidas y siguiente paso accionable; el JSON trae lo mismo en `summary`.
+- `bondy/core/source.py`: índice de elementos del HTML para asignar línea a hallazgos de axe/selectores.
+- Tests `test_reports.py`, `test_baseline.py`, `test_suppress.py`, `test_redact.py`, `test_ci_files.py`, `test_summary.py`.
+
 ### Changed
+- JSON de `scan`: los hallazgos son ahora uno por elemento afectado (`selector`, `snippet`, `line`, `fix`, `fingerprint`; ya no hay `nodes`/`count`), con rutas relativas a la carpeta escaneada y `/`; nuevas claves `summary`, `baseline`, `suppressions`, `suppressed`.
+- `bondy scan` calcula el exit code sobre los hallazgos nuevos (no baselined ni suprimidos); la lógica de los códigos 0/1/2/3 no cambia.
+- `bondy/scan.py`: `load_page`/`scan_loaded` separan lectura y escaneo; el HTML se lee una sola vez y se hashea (`FileResult.html`, `sha256`, `reused`).
+- El pipeline ejecuta la etapa semántica antes de los escáneres (una key inválida falla antes de lanzar el navegador); los scripts de los escáneres usan `playwright_context()` y comparten el navegador del escaneo.
+- `vision_tools._generate` (modo agente) pasa la API key explícita leída de `Settings` (sin cambiar el resto del comportamiento).
+- `scan` escribe `.bondy/` en la carpeta escaneada solo cuando hace falta (LLM, `--changed-only`, `--since`, `--resume`; desactivable con `--no-cache`) y crea dentro un `.gitignore` con `*`; un `scan --no-llm` simple no escribe nada.
 - `bondy scan` devuelve 3 cuando el resultado es parcial y no hay hallazgos al umbral de `--fail-on`.
 - `scan.py`: el mapeo WCAG de cada escáner sale de `bondy/core/checks.py`; `scan_path` acepta `max_files`. `fast_api_app.py` toma la lista "auditar todo" de la misma fuente.
 - Regla 3 de `.agents/AGENTS.md`: el pipeline por código es el predeterminado (D1); el agente ADK es el modo opcional.
@@ -71,6 +94,8 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 - `web/app.js` (`applyFix`): `originalText` fuera del `try` (evita `ReferenceError` en el `catch`).
 - `web/app.js`: respuesta no-array ya no rompe el render de resultados.
 - `fast_api_app.py`: ya no se oculta el error de formato JSON bajo "timed out".
+- Una página con `Content-Security-Policy` estricta ya no hace fallar a axe (`bypass_csp` en el contexto del navegador; la guardia de red sigue activa).
+- El reporte HTML de Bondy escrito dentro de la carpeta escaneada se omite en el siguiente escaneo (marca `<meta name="generator" content="bondy-report">`) en lugar de auditarse y salir con código 2.
 
 ### Removed
 - Modelos sin uso en `agent.py`: `Evidence`, `Finding`, `FixSuggestion`, `FindingsReport`, `FixesReport`.

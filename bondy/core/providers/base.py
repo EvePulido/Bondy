@@ -16,10 +16,17 @@ from typing import Literal, Protocol
 
 from pydantic import BaseModel
 
-from bondy.app_utils.vision_tools import _quota_retry_delay
+from bondy.core.alt_rules import quota_retry_delay
 
 ErrorKind = Literal[
-    "quota_daily", "rate_limit", "unavailable", "timeout", "attempt_limit", "other"
+    "invalid_key",  # 400 API_KEY_INVALID / 401 / 403: never retried, scan aborts
+    "quota_daily",
+    "rate_limit",
+    "network",  # cannot reach the API at all (DNS, refused, offline)
+    "unavailable",
+    "timeout",
+    "attempt_limit",
+    "other",
 ]
 
 
@@ -40,6 +47,7 @@ class LLMRequest:
 
     parts: Sequence[Part]
     schema: type[BaseModel] | None = None
+    max_output_tokens: int | None = None
 
     @property
     def has_media(self) -> bool:
@@ -82,20 +90,36 @@ class LLMProvider(Protocol):
 
 
 # ----- Quota / error classification -----
-# Reused as-is from the legacy vision tools (one implementation of the policy):
-# a per-minute 429 returns the wait in seconds (max 60); a daily quota
+# ``quota_retry_delay`` (imported above) is the single implementation of the
+# policy: a per-minute 429 returns the wait in seconds (max 60); a daily quota
 # ("PerDay") and any non-429 error return None.
-quota_retry_delay = _quota_retry_delay
+
+_INVALID_KEY = re.compile(
+    r"API_KEY_INVALID|API key (?:not valid|expired)|UNAUTHENTICATED|"
+    r"PERMISSION_DENIED|^\s*(?:401|403)\b",
+    re.IGNORECASE,
+)
+_NETWORK = re.compile(
+    r"ConnectError|ConnectTimeout|ConnectionError|getaddrinfo|Name or service|"
+    r"Temporary failure in name|Network is unreachable|connection "
+    r"(?:refused|reset|aborted)|SSLError",
+    re.IGNORECASE,
+)
 
 
 def classify_error(error: Exception) -> ErrorKind:
     msg = str(error)
+    # quota first: a 429 body may mention keys/projects in passing
+    if "429" in msg or "RESOURCE_EXHAUSTED" in msg:
+        return "quota_daily" if "PerDay" in msg else "rate_limit"
+    if _INVALID_KEY.search(msg):
+        return "invalid_key"
+    if isinstance(error, ConnectionError) or _NETWORK.search(msg):
+        return "network"
     if isinstance(error, TimeoutError) or re.search(
         r"timed? ?out|DEADLINE_EXCEEDED", msg, re.IGNORECASE
     ):
         return "timeout"
-    if "429" in msg or "RESOURCE_EXHAUSTED" in msg:
-        return "quota_daily" if "PerDay" in msg else "rate_limit"
     if "503" in msg or "UNAVAILABLE" in msg or "overloaded" in msg.lower():
         return "unavailable"
     return "other"
@@ -152,12 +176,35 @@ class RetryingProvider:
                     return LLMResponse(text, model, attempts, usage)
                 except Exception as e:  # classified below
                     last = e
+                    if classify_error(e) == "invalid_key":
+                        # a bad key fails on every model: no retry, no fallback
+                        raise ProviderError(
+                            "invalid_key", self._summary(e), attempts
+                        ) from None
                     delay = quota_retry_delay(e)
                     if delay is None or attempt == 1:
                         break  # not a per-minute quota, or already retried
                     self._sleep(delay)
         assert last is not None
         kind = classify_error(last)
-        first_line = self._redact(str(last)).strip().splitlines()[:1]
-        detail = first_line[0][:300] if first_line else type(last).__name__
-        raise ProviderError(kind, f"All models failed ({kind}): {detail}", attempts)
+        raise ProviderError(
+            kind, f"All models failed ({kind}): {self._summary(last)}", attempts
+        )
+
+    def _summary(self, error: Exception) -> str:
+        first_line = self._redact(str(error)).strip().splitlines()[:1]
+        return first_line[0][:300] if first_line else type(error).__name__
+
+    def check_key(self) -> LLMResponse:
+        """ONE minimal request, no retries: validates key/network/quota.
+
+        Spends a request (a few tokens). Raises ``ProviderError`` with kind
+        ``invalid_key`` / ``rate_limit`` / ``quota_daily`` / ``network`` / ...
+        """
+        model = (self._text_models or self._vision_models or [""])[0]
+        request = LLMRequest(parts=["Reply with OK."], max_output_tokens=4)
+        try:
+            text, usage = self._send(model, request)
+        except Exception as e:
+            raise ProviderError(classify_error(e), self._summary(e), 1) from None
+        return LLMResponse(text, model, 1, usage)

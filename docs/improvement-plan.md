@@ -100,8 +100,8 @@ Estado en la rama `refactor/package-bondy` (sin commitear).
 | A1 | Renombrar `app/` → `bondy/`; recursos a `bondy/resources/` con `importlib.resources`. | **Hecho** | `git mv`; el wheel contiene `resources/` (verificado). Subpaquete `app_utils` se mantiene (renombrado mecánico). Nombre de la `App` ADK y `app_name` pasan de `"app"` a `"bondy"` (rutas `/apps/bondy/...`). `git-commit-formatter` salió del proyecto y quedó como skill global en `~/.claude/skills/` (no forma parte del runtime). `demo_sites/` **no** se renombró a `examples/` (lo referencian `ALLOWED_SOURCES`, tests y `security.py`; se hará con D1). `.gitignore` tenía `Bondy/`, que git (insensible a mayúsculas en Windows/macOS) aplicaba también al paquete `bondy/`: se corrigió para que los archivos nuevos no queden ignorados. `bondy --version` funciona (ver A3); `pip install .` en venv limpio: imports y recursos OK; el escaneo con navegador quedó verificado en A6 (cierre de la Fase A). |
 | A2 | Dependencias por extras. | **Hecho** | Núcleo: `playwright`, `google-genai`, `pydantic` (no hizo falta `beautifulsoup4`/`lxml`). Extras `server`, `agent`, `gcp`, `mcp` (+ `eval`, `lint` existentes). El grupo `dev` incluye `bondy[server,agent]`. Telemetría apagada por defecto (documentado en README). `bondy/__init__.py` ya no importa ADK (`__getattr__` perezoso). Regla 3 de AGENTS.md actualizada. Pendiente: el servidor web aún requiere `agent` (usa ADK); desacoplarlo es parte de B2. |
 | A3 | CLI: `scan`, `fix`, `serve`, `estimate`, `doctor`. | **Parcial (MVP)** | Hecho: `bondy scan <archivo\|carpeta> [--no-llm] [--format terminal\|json] [--fail-on] [--checks] [--include/--exclude] [--config]` con códigos de salida 0/1/2, y `python -m bondy`. Pendiente: `fix`, `serve`, URLs. `estimate` y `scan` con el LLM llegaron en la Fase B, entrega 1. Sin browser compartido ni paralelismo (cada escáner abre su Chromium; Fase B). |
-| A4 | Configuración `bondy.toml` + env + flags. | **Hecho** | `bondy/config.py`; precedencia flag > env > archivo > default, con tests. La API key **no** se acepta en `bondy.toml`. `GEMINI_API_KEY` precede a `GOOGLE_API_KEY`. **Parcial tras la Fase B/entrega 1**: el pipeline nuevo (`bondy/core/providers/gemini.py`) lee `Settings` (modelo, `vision_model`, `fallback_model`) y pasa la key explícita al `Client`. Pendiente: `vision_tools.py`/`agent.py`/`fast_api_app.py` (modo agente y UI) siguen leyendo `BONDY_VISION_MODEL`/`BONDY_FALLBACK_MODEL` y usando `Client()` sin key explícita. Presupuesto añadido en B6 (`max_*`, `price_*`, `batch_size`, `tokens_per_image`). |
-| A5 | `bondy doctor`. | **Parcial** | Hecho (offline): Python, paquete/binario de Chromium, axe-core, `bondy.toml`, key presente (nunca se imprime), permiso de escritura; cada fallo da el comando. Pendiente: validar la key con 1 petición real (consume cuota; no se implementó a propósito). |
+| A4 | Configuración `bondy.toml` + env + flags. | **Hecho** | `bondy/config.py`; precedencia flag > env > archivo > default, con tests. La API key **no** se acepta en `bondy.toml`. `GEMINI_API_KEY` precede a `GOOGLE_API_KEY`. **Parcial tras la Fase B**: el pipeline nuevo (`bondy/core/providers/gemini.py`) lee `Settings` (modelo, `vision_model`, `fallback_model`) y pasa la key explícita al `Client`. Entrega 2: `vision_tools._generate` (modo agente) también pasa la key explícita desde `Settings`. Pendiente: `vision_tools.py`/`agent.py`/`fast_api_app.py` siguen leyendo `BONDY_VISION_MODEL`/`BONDY_FALLBACK_MODEL` (modelos) directamente. Presupuesto añadido en B6 (`max_*`, `price_*`, `batch_size`, `tokens_per_image`). |
+| A5 | `bondy doctor`. | **Parcial** | Hecho (offline): Python, paquete/binario de Chromium, axe-core, `bondy.toml`, key presente (nunca se imprime), permiso de escritura; cada fallo da el comando. **Hecho (entrega 2)**: `bondy doctor --check-key` (opt-in, 1 petición mínima; distingue key rechazada / cuota / red); sin esa flag doctor sigue offline. |
 | A6 | Navegador del sistema / modo estático. | **Hecho** | `bondy/app_utils/browser.py::launch_with_label` es el único lanzador: Chromium de Playwright, luego `channel="chrome"`, `channel="msedge"` y por último el ejecutable de Chrome/Edge encontrado en disco (`executable_path`; añadido porque en Linux `channel=chrome` solo mira `/opt/google/chrome`). Si nada arranca lanza `BrowserUnavailableError` con el comando exacto (`python -m playwright install chromium`). Lo usan los 4 escáneres Playwright, `render_page.py` y `doctor` (que ahora lanza el navegador de verdad y dice cuál se usará). **Modo estático**: si no hay navegador, `bondy scan` no falla; omite `axe`, `contrast`, `focus-trap` y `focus-order`, ejecuta `lang`, `labels`, `accessible-name` y un `img-alt` por regex (sustituto parcial de la regla `image-alt` de axe), lo declara en `notes` (`static_mode: true` y `omitted_checks` por archivo en JSON) y sale con 0/1; un error real de un escáner sigue dando 2. Verificado con el wheel en un venv limpio: ver hallazgos. |
 
 **Cierre de la Fase A (hallazgos y verificación)**
@@ -119,17 +119,17 @@ Estado en la rama `refactor/package-bondy` (sin commitear).
 | B1 | **Modo `--no-llm`** (axe + skills deterministas). Es el valor base sin key. | S | Salida completa sin red. **Hecho** (fase A). |
 | B2 | **Pipeline por código** (ver D1): sin turnos de agente para escáneres; prompts cortos. | L | ≤2 peticiones por página típica. **Hecho (entrega 1)**: `bondy/core/` (ver "Cierre de la Fase B, entrega 1"). `bondy scan` sin `--no-llm` usa el pipeline; sin key cae a `--no-llm` con aviso. La interfaz `LLMProvider` + `GeminiProvider` + `FakeProvider` (D2) también está hecha. |
 | B3 | **Lotes de imágenes**: N imágenes por petición con esquema JSON de salida; fusionar `verify` + `classify`. | M | Misma decisión (`keep`/`fix`/`needs_manual_review`) que hoy en los 3 demos (tests golden). **Hecho (entrega 1)**: lotes de `batch_size` (def. 8), una llamada fusionada, dedup por (src, alt), plantillas deterministas, 1 reintento por JSON inválido. El "golden" se hizo como **paridad con `decide_alt_recommendation`** (rejilla alt x match x confianza) y no contra Gemini real (sin cuota): ver hallazgos. |
-| B4 | **Caché** `.bondy/cache` por hash(imagen + alt + modelo + versión de prompt). Invalidación al cambiar prompt/modelo. | M | Segundo escaneo = 0 peticiones. **Pendiente** (solo existe `PROMPT_VERSION` en `semantic.py` como futura parte de la clave). |
+| B4 | **Caché** `.bondy/cache` por hash(imagen + alt + modelo + versión de prompt). Invalidación al cambiar prompt/modelo. | M | Segundo escaneo = 0 peticiones. **Hecho (entrega 2)**: `bondy/core/store.py`; clave = hash(bytes de la imagen + alt + contexto/lang/señales enviados + modelo + `PROMPT_FINGERPRINT`, que cubre el texto del prompt, su versión y el esquema JSON). Escritura atómica, entradas ilegibles = miss, sin key ni rutas absolutas. `--no-cache`, `--clear-cache`, `--cache-dir`, `bondy cache clear`. |
 | B5 | `bondy estimate`: cuenta imágenes/páginas/tokens y muestra **rango de costo** con precios configurables antes de gastar; `--dry-run`. | M | Muestra "N peticiones, ~X tokens, ~$Y". **Hecho (entrega 1)**: `bondy estimate <ruta>` y `bondy scan --dry-run` (`bondy/core/estimate.py`); no llama al modelo ni descarga imágenes remotas. Es una estimación (caracteres/4 + `tokens_per_image`); no hay precios por defecto: sin configurarlos el costo en dólares figura como no disponible. |
 | B6 | **Topes duros**: `--max-requests`, `--max-usd`, `--max-pages`, `--max-images`; al llegar al tope, se detiene y entrega parcial. | S | Test que fuerza el tope. **Hecho (entrega 1)**: resultado PARCIAL con motivo y código de salida 3 (ver hallazgos). `--max-requests` cuenta también los reintentos internos (429). |
 | B7 | **Escalado de modelo**: barato por defecto, caro solo si baja la confianza; configurable. | S | Métrica de cuántas escalan. |
 | B8 | **Batch API opcional** (`--batch`, -50%, hasta 24 h) para repos grandes/CI nocturno; con `bondy fetch <job>`. | L | Job reanudable. |
-| B9 | **Escaneo incremental**: solo archivos cambiados (hash o `git diff`). | M | Re-escaneo sin cambios = 0 peticiones. |
-| B10 | Gestión de cuotas: distinguir 429 por minuto (esperar `retryDelay`) y por día (parar y decirlo), con resultados parciales y reanudación (`--resume`). | M | Sin reinicios completos. |
+| B9 | **Escaneo incremental**: solo archivos cambiados (hash o `git diff`). | M | Re-escaneo sin cambios = 0 peticiones. **Hecho (entrega 2)**: `--changed-only` (hash del HTML + hash de las imágenes locales que referencia; invalida al cambiar versión de Bondy, checks, modelo, escáneres, `--static` o el prompt) y `--since <ref>` (git; esas páginas se escanean; las demás reutilizan el resultado guardado si el hash y la configuración coinciden, si no salen `skipped: unchanged since <ref> (no saved result to reuse)`; no cuenta como parcial). |
+| B10 | Gestión de cuotas: distinguir 429 por minuto (esperar `retryDelay`) y por día (parar y decirlo), con resultados parciales y reanudación (`--resume`). | M | Sin reinicios completos. **Hecho (entrega 2)**: la distinción 429 minuto/día ya estaba (entrega 1); ahora cuota diaria, topes, `--scan-timeout` y Ctrl+C dejan `resume.json` + páginas completas + veredictos en caché, y `--resume` no repite peticiones. Ctrl+C termina con gracia (exit 3). |
 
 ### Cierre de la Fase B, entrega 1 (B2, B3, B5, B6 + `LLMProvider`)
 
-Rama `feat/pipeline-no-llm` (sin commitear). Estado: 183 tests unitarios pasan, `ruff check .` limpio (tras aplicar las decisiones del usuario de abajo). **Nada se verificó contra Gemini real** (cuota diaria agotada): todos los tests usan `FakeProvider`/mocks.
+Rama `feat/pipeline-no-llm` (sin commitear). Estado: 183 tests unitarios pasan, `ruff check .` limpio (tras aplicar las decisiones del usuario de abajo). La entrega 2 (caché, incremental, reanudación) está en la sección siguiente. **Nada se verificó contra Gemini real** (cuota diaria agotada): todos los tests usan `FakeProvider`/mocks.
 
 **Qué se construyó** (`bondy/core/`, sin FastAPI ni ADK)
 
@@ -172,11 +172,100 @@ Rama `feat/pipeline-no-llm` (sin commitear). Estado: 183 tests unitarios pasan, 
 - **Imágenes remotas (decisión del usuario)**: `images.py` **descarga imágenes http(s) públicas por defecto** (host validado con `validate_public_url`, cada redirección revalidada; sin protección contra DNS rebinding), como ya hacía `vision_tools._load_image`. Solo hay opt-out: `--no-remote-images` / `remote_images = false` / `BONDY_REMOTE_IMAGES`; con él esas imágenes van a `needs_manual_review` con motivo accionable y `estimate`/`--dry-run` lo reflejan. La contención de rutas locales no cambia.
 - **Sin verificar con Gemini real**: que `response_schema=BatchAnalysis` (modelo anidado con lista) sea aceptado tal cual; `HttpOptions(timeout=60000)` (ms); el tope de ~20 MB por petición con imágenes inline (se usa 15 MB conservador, `MAX_BATCH_BYTES`); que GIF no sea soportado (se trata como no soportado junto con SVG/AVIF); los tokens por imagen (`tokens_per_image=1100` es un marcador).
 - **Precios (decisión del usuario, opción B)**: `price_input_per_mtok`/`price_output_per_mtok` no tienen valores por defecto (`None`). Sin ellos `estimate`, `--dry-run` y el resumen muestran peticiones y tokens y declaran el costo no disponible (JSON: `cost_usd: null` + `cost_unavailable_reason`); `--max-usd` sin precios falla con código 2 antes de llamar al modelo. `tokens_per_image=1100` sigue siendo un marcador de estimación.
-- **Acoplamiento**: `bondy/core/` importa de `bondy/app_utils/vision_tools.py` (reglas de grounding, heurísticas, `_quota_retry_delay`) para no duplicar lógica; ese módulo lee `BONDY_VISION_MODEL` a nivel de módulo. Conviene mover esas piezas a `core` cuando se retire el modo agente.
+- **Acoplamiento (resuelto en la entrega 2)**: las reglas de grounding, heurísticas y `quota_retry_delay` viven ahora en `bondy/core/alt_rules.py`; `vision_tools` (modo agente) las importa de ahí y `bondy/core` ya no importa `vision_tools` (test en `test_shared_rules.py`).
 - **`web/app.js`** tiene su propio mapeo checks->WCAG: no se unificó (cambios a la UI fuera de alcance).
 - **La UI web y `/api/audit` siguen usando el agente ADK**; migrarlos al pipeline queda para una entrega posterior.
 - **Calidad del alt "funcional"**: depende de que el modelo siga la regla "describe el destino, no la imagen"; no se puede verificar sin llamadas reales.
-- **No empezado (fuera de alcance)**: B4 (caché), B7, B8, B9, B10, validación real de la key, timeouts globales/navegador compartido (siguiente entrega).
+- **No empezado (fuera de alcance)**: B4 (caché), B7, B8, B9, B10, validación real de la key, timeouts globales/navegador compartido (siguiente entrega). (B4, B9, B10, validación de la key y timeouts: hechos en la entrega 2.)
+
+### Cierre de la Fase B, entrega 2 (B4, B9, B10, key, D6, deuda)
+
+Rama `feat/cache-and-resume` (sin commitear). 277 tests unitarios pasan, `ruff check .` limpio. Todo con `FakeProvider`/mocks; ninguna llamada a Gemini real. Chromium real solo en los tests de red/axe ya existentes y en una verificación manual local.
+
+**Estructura de la persistencia** (todo bajo `cache_dir`, por defecto `<carpeta escaneada>/.bondy/cache`; ruta relativa = relativa a la carpeta escaneada)
+
+| Archivo | Contenido |
+|---|---|
+| `verdicts/<sha256>.json` | Un veredicto del modelo por imagen (B4). |
+| `pages.json` | Por página (ruta relativa): hash del HTML, hash de sus imágenes locales, hallazgos, resultados de imágenes y fixes (B9). Se invalida entero si cambia la huella de configuración. |
+| `resume.json` | Marca de escaneo parcial: motivos y páginas pendientes (B10). Se borra al terminar completo. |
+
+`bondy cache clear` y `--clear-cache` solo borran esos nombres (nunca el directorio entero). `.bondy/` se auto-ignora: Bondy escribe dentro un `.gitignore` con `*` (sin sobrescribir uno existente). Un `scan` determinista simple (`--no-llm`/`--static` sin `--changed-only`/`--since`/`--resume`) no crea nada en la carpeta escaneada.
+
+**Decisiones de diseño tomadas (revisables)**
+
+- **`--no-cache` desactiva toda la persistencia** (veredictos, estado de páginas y marca de reanudación); con `--changed-only`/`--resume` es un error de uso (exit 2).
+- **`--resume` = `--changed-only` + marca**: reutiliza páginas completas y veredictos ya guardados; una página interrumpida se vuelve a escanear entera (sus escáneres deterministas se repiten, las peticiones no). Un lote en curso nunca se guarda a medias: se reintenta entero.
+- **Una página parcial no se guarda** (imágenes `skipped` o fallo transitorio del proveedor/red); una `needs_manual_review` determinista (404, formato) sí.
+- **Reutilización**: hash del HTML (bytes) + hash de los archivos de imagen locales que referencia. Las imágenes remotas se identifican solo por URL (no se descargan para decidir): si una imagen remota cambia con la misma URL, `--changed-only` no lo ve (la caché de veredictos sí, porque hashea los bytes cuando se descarga).
+- **Comprobación de la key**: no hay petición extra por escaneo (rompería "re-escaneo = 0 peticiones"). La etapa semántica corre **antes** de los escáneres y el primer lote hace de comprobación: 400 `API_KEY_INVALID`/401/403 abortan con exit 2, sin reintentos ni modelo de respaldo, antes de lanzar ningún navegador. Un escaneo totalmente en caché no necesita la key.
+- **Orden del pipeline**: cargar páginas -> reutilizar -> etapa semántica -> escáneres (un navegador) -> fusionar -> persistir. Los hallazgos de imágenes se fusionan después de los escáneres.
+- **`--since <ref>`**: git validado (sin guion inicial ni espacios; `--` termina la lista de revisiones); esas páginas más las no rastreadas se escanean; las demás **reutilizan el estado guardado** cuando el hash del contenido y la huella de configuración coinciden (el hash manda sobre lo que diga git); si no hay resultado válido quedan `skipped: unchanged since <ref> (no saved result to reuse)`, sin marcar resultado parcial.
+- **Timeouts por defecto**: `timeout = 60` s por página y `scan_timeout = 900` s; `0` = sin límite. Al vencer `scan_timeout` el resultado es parcial (exit 3) y reanudable.
+- **Archivo modificado durante el escaneo**: se escanea el contenido leído una sola vez; si el hash en disco difiere al terminar, el resultado se informa pero no se guarda para reutilización.
+- **Cuota/red**: `ErrorKind` nuevo `invalid_key` y `network`; mensajes distintos para cuota diaria, red caída, timeout y 503.
+
+**Medición con `FakeProvider` (no Gemini real), copia de `demo_sites/`: 4 páginas, 9 imágenes únicas, lote 8**
+
+| Escaneo | Páginas escaneadas / reutilizadas | Peticiones | Aciertos/fallos de caché |
+|---|---|---|---|
+| 1.º | 4 / 0 | 2 | 0 / 9 |
+| 2.º idéntico (solo caché) | 4 / 0 | 0 | 9 / 0 |
+| 2.º `--changed-only` | 0 / 4 | 0 | n/a |
+| 1 archivo editado (texto), `--changed-only` | 1 / 3 | 0 | 7 / 0 |
+| 1 archivo + 1 imagen nueva, `--changed-only` | 1 / 3 | 1 | 7 / 1 |
+
+**Hallazgos / pendientes**
+
+- **JS que gira tras cargar**: medido con Chromium real y `page_timeout=3`: `while(true){}` dentro del script de carga falla a los 3 s (`Page.goto: Timeout`); en cambio un bucle que arranca tras `load` dejó `page.evaluate` colgado ~85 s hasta que Chromium cerró la pestaña (`TargetClosedError`), sin que lo corte el timeout de Playwright. Un watchdog real exigiría matar el proceso del navegador (la API síncrona no es thread-safe) o ejecutar cada página en un subproceso; no se hizo. El `scan_timeout` se comprueba entre páginas, escáneres y lotes, no dentro de una evaluación bloqueada.
+- Dos procesos `bondy scan` sobre la misma caché son seguros (escritura atómica con `os.replace`); `pages.json` es "el último gana" (puede perder el trabajo de página del otro, no se corrompe).
+- Escribir `.bondy/` en el proyecto escaneado es un cambio de comportamiento: documentado en el README, solo ocurre cuando hace falta (LLM, `--changed-only`, `--since`, `--resume`), se auto-ignora con su propio `.gitignore` y es desactivable con `--no-cache`/`cache = false`.
+- **Limitación conocida (decisión: no implementar watchdog duro)**: un bucle JS que arranca tras `load` bloquea `page.evaluate` hasta que Chromium cierra la pestaña (~85 s medidos); `--scan-timeout` solo se comprueba entre páginas/escáneres/lotes. Mitigación: `--scan-timeout` + `--resume`. Un subproceso por página o matar el navegador desde un hilo añade complejidad y costo de rendimiento para un caso raro.
+- El `PROMPT_FINGERPRINT` no cubre `decide()`/plantillas (cambian la decisión, no el veredicto del modelo), por eso la reutilización de páginas se invalida con la versión de Bondy.
+- Sin verificar con Gemini real: el texto exacto de los errores 400/401/403 (la clasificación se basó en los formatos documentados de `google-genai`, `API_KEY_INVALID`, `PERMISSION_DENIED`, `UNAUTHENTICATED`), `max_output_tokens=4` en la comprobación de la key y que `models.generate_content` rechace con 400 una key inválida sin cobrar.
+
+### Cierre de la Fase E (entrega 3: E1-E5 y D3)
+
+Rama `feat/cache-and-resume` (sin commitear; se apila sobre la entrega 2). 410 tests unitarios pasan (1 omitido a propósito: validación contra el esquema SARIF oficial, ver abajo) y `ruff check .` limpio. Todo determinista: ninguna llamada nueva al modelo; los tests usan `FakeProvider`/escáneres simulados.
+
+**Qué se construyó** (`bondy/core/`)
+
+| Módulo | Responsabilidad |
+|---|---|
+| `report.py` | Modelo único (`Report`, `Item`, `Suppression`, `BaselineInfo`): un `Item` por elemento afectado, rutas relativas con `/`, huella estable (regla + ruta + selector/fragmento normalizado, sin línea; duplicados con sufijo `~n`), línea asignada por el índice del HTML cuando el elemento es único, `exit_code`, `summary` y `next_step`. |
+| `formats.py` | Renderizadores terminal / JSON / Markdown / HTML / SARIF; solo presentan el modelo y escapan por formato. |
+| `source.py` | Índice de elementos del HTML (etiqueta+atributos normalizados, línea) para localizar hallazgos y objetivos de `bondy-ignore`. |
+| `baseline.py` | Crear/cargar/aplicar baseline (versión 1, determinista, sin fecha), resueltos y "no reevaluados". |
+| `suppress.py` | Comentarios `bondy-ignore` y `[[ignore]]`: validación, aplicación, obsoletas. |
+| `redact.py` | `redact_secrets`, `contains_secret`. |
+
+**Decisiones de diseño tomadas (revisables)**
+
+- **Granularidad**: un `Item` por nodo de axe (antes un hallazgo con `nodes`). Cambia la forma del JSON (documentado en CHANGELOG). Las huellas y el baseline operan por elemento.
+- **Huella**: `sha256(regla, ruta relativa, selector || fragmento || mensaje normalizado)[:32]`. Dos elementos idénticos en la misma página comparten clave y se distinguen por orden (`~2`); si se inserta uno idéntico antes, el "nuevo" puede ser cualquiera de los dos (inherente).
+- **`regla`** = id de regla de axe, o el nombre del escáner de Bondy (`contrast`, `lang`, `labels`, `alt-text`...). Las supresiones aceptan ese id o un criterio WCAG (`1.4.3` / `WCAG 1.4.3`).
+- **SARIF**: solo contiene los hallazgos nuevos. Los baselined/suprimidos no se emiten porque la documentación de GitHub (verificada) no menciona `suppressions` ni `baselineState`; los conteos van en `runs[0].properties.bondy`. `uri` es relativa a la carpeta escaneada con `uriBaseId: %SRCROOT%`; GitHub resuelve desde la raíz del repositorio, así que se añadió `--sarif-prefix` (la action lo calcula).
+- **`--output`**: el archivo recibe el formato elegido y stdout el resumen de terminal (o solo "Report written to" si el formato ya es terminal). El código de salida no cambia.
+- **Baseline create** rechaza escribir si el escaneo tuvo errores (exit 2) o es parcial (exit 3). El archivo por defecto es `bondy-baseline.json`. Un baseline de `bondy.toml` se resuelve relativo a ese archivo; por flag/env, relativo al cwd.
+- **"Resueltos"**: solo cuentan entradas cuyo archivo se escaneó completo, cuyo escáner corrió (modo con/sin navegador, con/sin modelo) y sin `--checks` que lo excluya; el resto va a `not_evaluated`. Un archivo borrado no se declara resuelto.
+- **Supresión**: se aplica antes que el baseline; un hallazgo suprimido nunca entra en `baseline create`. Un comentario se ata al elemento por firma de etiqueta (tag + atributos) o por selector simple y único; elementos idénticos se suprimen juntos; hallazgos sin elemento (p. ej. `focus-trap`) solo se suprimen por `[[ignore]]`, salvo los de nivel de página con un comentario antes de `<html>`.
+- **Obsoletas**: solo se declaran cuando el escaneo fue completo, sin `--checks`, y el archivo se evaluó entero (sin errores/omitidos); si no, quedan `unverified` y no se listan como obsoletas. Una regla bien formada pero inexistente aparece como obsoleta ("no finding matched"): no se enumeran las reglas de axe offline (se intentó extraerlas de `axe.min.js` y la lista salió incompleta), así que no se rechaza por nombre.
+- **Glob de `[[ignore]]`**: se rechaza lo absoluto, `~`, unidades de disco y cualquier segmento `..`; `\` se normaliza a `/`.
+- **Redacción**: antes de truncar, sobre alt y contexto enviados (esto también alimenta la clave de la caché), sobre los textos de los reportes (después de calcular la huella) y como comprobación al guardar `pages.json`: si el resultado de una página contiene texto con aspecto de secreto **no se guarda** (se reescanea; sus veredictos siguen en caché, así que no cuesta peticiones). No se añadió `--no-redact`: un falso positivo solo recorta algo de contexto, y un interruptor que envía secretos no aporta nada que el usuario necesite.
+- **Terminal**: los caracteres de control de datos del proyecto se sustituyen por `?` (inyección de secuencias ANSI).
+- **HTML del reporte**: CSS inline, sin JS, `<meta CSP default-src 'none'>`, landmarks (`header`/`main`/`footer`), `lang="en"`, tablas con `caption`/`scope`, colores AA comprobados por test (claro y oscuro).
+
+**CI (E3)**: `action.yml` (composite), `.pre-commit-hooks.yaml`, `docs/ci-example.yml` (no activo). Verificado con `git ls-remote` contra los repos oficiales: `github/codeql-action` v4.38.3 -> `24c54180a607b1449ed407dd24f251e4e9147c8d`; `actions/setup-python` v7.0.0 -> `5fda3b95a4ea91299a34e894583c3862153e4b97`; `actions/checkout` v7.0.1 -> `3d3c42e5aac5ba805825da76410c181273ba90b1`. **No se ejecutó en GitHub**: la action y el hook solo se validaron como YAML y por tests de estructura/semántica (el hook se probó con `--since HEAD` en un repo temporal). TODO explícito: la coordenada `owner/repo@ref` con la que se consumirá la action (`docs/ci-example.yml` usa `uses: ./`) y la URL del repositorio en `.pre-commit-hooks.yaml` no existen todavía.
+
+**Hallazgos / pendientes**
+
+- SARIF validado contra el esquema oficial de OASIS (`sarif-schema-2.1.0.json`, descargado de docs.oasis-open.org; 0 errores con `jsonschema` Draft 4) sobre la salida real de `demo_sites/site_3_mixed_errors`. El esquema **no** está vendorizado ni la prueba corre por defecto (`BONDY_SARIF_SCHEMA=<ruta>` la activa); el test por defecto es estructural estricto.
+- Sin verificar con GitHub real: que las rutas con `--sarif-prefix` se asocien a archivos del repositorio, que `partialFingerprints` desduplique entre ejecuciones, y el comportamiento de la action (instalación con `pip install $GITHUB_ACTION_PATH`, Chromium con `--with-deps`).
+- El pre-commit hook usa `entry: bondy scan . --since HEAD`: escanea la raíz del repositorio y necesita al menos un commit; para subcarpetas hay que copiar el hook. `scan` acepta una sola ruta (no los nombres de archivo que pre-commit pasaría).
+- Redacción por patrones: no cubre formatos inusuales, secretos dentro de píxeles de imagen ni los cortados por la ventana de contexto (2000 caracteres al extraer). La respuesta del modelo (veredicto) no se redacta: si una imagen muestra un secreto el modelo podría reproducirlo en `visible_content`/`suggested_alt`.
+- `render_usage`/resumen de terminal pasaron de `cli.py` a `formats.py`; el progreso en vivo por página/imagen (E5) sigue sin implementar.
+- `estimate` acepta los nuevos `--format` pero solo distingue `json`; otros formatos imprimen texto.
+- Los hallazgos de una página reutilizada (`--changed-only`) se tratan igual que los recién escaneados para baseline/supresión (se aplican al construir el reporte, no se guardan).
 
 ### Fase C — Casos extremos y robustez (P0/P1)
 
@@ -237,21 +326,21 @@ El modelo de amenaza cambia: ya no es "un tercero ataca mi servidor", sino "un p
 |---|---|---|---|
 | D1 | Escritura solo dentro de la raíz del proyecto (resolve + `is_relative_to`, sin symlinks fuera). Sustituye a la lista `ALLOWED_SOURCES`. | M | Tests de traversal y symlink. |
 | D2 | SSRF: por defecto bloquear IPs privadas/metadatos; **permitir `localhost`/dev-server solo con `--allow-localhost`** (necesario para escanear su propio servidor). | S | Test de metadata `169.254.169.254` bloqueada. |
-| D3 | Privacidad: aviso explícito de qué se envía al proveedor (HTML/imágenes), `--exclude` por patrón, **redactor de secretos** (tokens/keys en scripts y atributos) antes de enviar, no enviar `.env`. | M | Test de redacción. |
+| D3 | Privacidad: aviso explícito de qué se envía al proveedor (HTML/imágenes), `--exclude` por patrón, **redactor de secretos** (tokens/keys en scripts y atributos) antes de enviar, no enviar `.env`. | M | Test de redacción. **Parcial (entrega 3)**: hecho el redactor (`bondy/core/redact.py`), su uso antes de enviar/hashear/guardar/reportar y el bloqueo de `.env`/`*.pem`/`id_rsa` como imagen; el aviso explícito de qué se envía está en el README (sección 2c y Seguridad), no como mensaje en tiempo de ejecución; `--exclude` ya existía. Sin `--no-redact` (ver decisiones). |
 | D4 | La API key: solo desde env/archivo del usuario; nunca en logs, reportes ni caché; enmascarada en `doctor`. | S | Test que busca la key en toda la salida. |
 | D5 | UI `serve`: enlazar a `127.0.0.1`, token de sesión aleatorio, sin CORS abierto, límite de tamaño de petición. | M | No accesible desde otra máquina. |
-| D6 | Navegador: contexto aislado, sin descargas, red limitada a lo necesario, timeouts globales. | S | **Parcial**: hecho contexto aislado (`new_context`, `accept_downloads=False`, service workers bloqueados) y red limitada en los 4 escáneres y `render_page` (ver hallazgos de la Fase A); test de 0 peticiones a un servidor local. **Pendiente**: timeouts globales por escaneo (hoy solo el `goto` de `render_page` tiene 20 s) y su test. |
+| D6 | Navegador: contexto aislado, sin descargas, red limitada a lo necesario, timeouts globales. | S | **Parcial**: hecho contexto aislado (`new_context`, `accept_downloads=False`, service workers bloqueados) y red limitada en los 4 escáneres y `render_page` (ver hallazgos de la Fase A); test de 0 peticiones a un servidor local. **Hecho (entrega 2)**: un solo navegador compartido por escaneo (`browser_session`), `--timeout` por página (def. 60 s) y `--scan-timeout` (def. 900 s), cierre garantizado (error y Ctrl+C), guard de red intacto (tests de 0 peticiones corren también dentro de la sesión). Limitación medida: un JS que gira *después* de cargar no es interrumpible por el timeout de página (ver hallazgos). |
 | D7 | Advertir de que el free tier de Google usa el contenido para mejorar productos; recomendar key de pago para código privado. | S | Mensaje en `doctor`/README. |
 
 ### Fase E — Salidas y experiencia de desarrollador (P1)
 
 | # | Tarea | Esfuerzo |
 |---|---|---|
-| E1 | Formatos: terminal legible, JSON, Markdown, HTML autocontenido, **SARIF** (GitHub code scanning). | M |
-| E2 | Códigos de salida y `--fail-on critical\|warning`; `bondy scan --baseline` para ignorar deuda existente. | S |
-| E3 | GitHub Action y hook de pre-commit oficiales (solo archivos cambiados). | M |
-| E4 | `# bondy-ignore` / lista de supresiones con motivo, versionable. | S |
-| E5 | Progreso real (por página/imagen) y resumen de costo al final: peticiones, tokens, caché, $ estimado. | S |
+| E1 | Formatos: terminal legible, JSON, Markdown, HTML autocontenido, **SARIF** (GitHub code scanning). | M | **Hecho (entrega 3)** |
+| E2 | Códigos de salida y `--fail-on critical\|warning`; `bondy scan --baseline` para ignorar deuda existente. | S | **Hecho (entrega 3)** |
+| E3 | GitHub Action y hook de pre-commit oficiales (solo archivos cambiados). | M | **Hecho como archivos (entrega 3)**; no ejecutado en la nube |
+| E4 | `# bondy-ignore` / lista de supresiones con motivo, versionable. | S | **Hecho (entrega 3)** |
+| E5 | Progreso real (por página/imagen) y resumen de costo al final: peticiones, tokens, caché, $ estimado. | S | **Resumen hecho (entrega 3)**; el progreso por página/imagen en vivo sigue pendiente |
 | E6 | UI web local (`bondy serve`): reutilizar `web/`, con selección de carpeta, progreso por SSE y botón "aplicar" solo con diff visible. | L |
 | E7 | Plantillas (JSX/TSX, Vue, Svelte, Jinja/ERB): extraer el HTML o auditar el build/render. | L (v2) |
 
