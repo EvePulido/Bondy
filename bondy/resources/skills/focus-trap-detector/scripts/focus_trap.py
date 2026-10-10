@@ -1,9 +1,14 @@
 import json
-import os
 import sys
-import tempfile
+from pathlib import Path
 
 from playwright.sync_api import sync_playwright
+
+try:
+    from bondy.app_utils.browser import open_page
+except ImportError:  # run as a standalone script: put the package root on sys.path
+    sys.path.insert(0, str(Path(__file__).resolve().parents[5]))
+    from bondy.app_utils.browser import open_page
 
 
 def detect_focus_trap(content: str) -> dict:
@@ -12,45 +17,24 @@ def detect_focus_trap(content: str) -> dict:
     trapped within a subset of elements (modal dialog, dropdown menu, etc.).
     """
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        page = browser.new_page()
+        # open_page aborts every request except the temp file, data: and about:
+        with open_page(p, html=content) as page:
+            focus_sequence = []
 
-        is_file = False
-        temp_path = None
+            # Simulate 30 tabs
+            for _ in range(30):
+                page.keyboard.press("Tab")
 
-        if content.startswith("http://") or content.startswith("https://"):
-            page.goto(content)
-        else:
-            fd, temp_path = tempfile.mkstemp(suffix=".html")
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                f.write(content)
-            page.goto(f"file://{temp_path}")
-            is_file = True
+                sel = page.evaluate("""() => {
+                    const el = document.activeElement;
+                    if (!el || el === document.body) return null;
+                    let s = el.tagName.toLowerCase();
+                    if (el.id) s += '#' + el.id;
+                    return s;
+                }""")
 
-        focus_sequence = []
-
-        # Simulate 30 tabs
-        for _ in range(30):
-            page.keyboard.press("Tab")
-
-            sel = page.evaluate("""() => {
-                const el = document.activeElement;
-                if (!el || el === document.body) return null;
-                let s = el.tagName.toLowerCase();
-                if (el.id) s += '#' + el.id;
-                return s;
-            }""")
-
-            if sel:
-                focus_sequence.append(sel)
-
-        browser.close()
-
-        if is_file and temp_path:
-            try:
-                os.remove(temp_path)
-            except OSError:
-                pass
+                if sel:
+                    focus_sequence.append(sel)
 
         # Detect cycle
         trap = False

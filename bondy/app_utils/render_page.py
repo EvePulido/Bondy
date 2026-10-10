@@ -10,39 +10,19 @@ Usage:
 
 import argparse
 import os
-import socket
 import sys
 import tempfile
 from pathlib import Path
-from urllib.parse import unquote, urlparse
 
 BASE_DIR = Path(__file__).resolve().parents[2]
 DEMO_SITES = (BASE_DIR / "demo_sites").resolve()
 MAX_HEIGHT = 4000
 
 
-def _is_public_host(host: str, cache: dict[str, bool]) -> bool:
-    if host not in cache:
-        from bondy.app_utils.security import validate_public_url
-
-        try:
-            validate_public_url(f"https://{host}/")
-            cache[host] = True
-        except (ValueError, socket.gaierror):
-            cache[host] = False
-    return cache[host]
-
-
-def _file_path_from_url(url: str) -> Path:
-    parsed = urlparse(url)
-    path = unquote(parsed.path)
-    if os.name == "nt" and path.startswith("/"):
-        path = path[1:]
-    return Path(path).resolve()
-
-
 def render(html: str | None, source: str | None, out_path: str) -> None:
     from playwright.sync_api import sync_playwright
+
+    from bondy.app_utils.browser import open_page
 
     temp_path = None
     if source:
@@ -55,33 +35,15 @@ def render(html: str | None, source: str | None, out_path: str) -> None:
             f.write(html or "")
         target = Path(temp_path).resolve()
 
-    allowed_roots = [DEMO_SITES, target]
-    host_cache: dict[str, bool] = {}
-
-    def handle(route):
-        url = route.request.url
-        if url.startswith(("data:", "about:")):
-            return route.continue_()
-        if url.startswith("file:"):
-            p = _file_path_from_url(url)
-            ok = any(p == r or r in p.parents for r in allowed_roots)
-            return route.continue_() if ok else route.abort()
-        host = urlparse(url).hostname
-        if url.startswith(("http://", "https://")) and host:
-            return (
-                route.continue_()
-                if _is_public_host(host, host_cache)
-                else route.abort()
-            )
-        return route.abort()
-
     try:
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
-            try:
-                page = browser.new_page(viewport={"width": 1280, "height": 800})
-                page.route("**/*", handle)
-                page.goto(target.as_uri(), wait_until="load", timeout=20000)
+            with open_page(
+                p,
+                path=target,
+                allowed_dirs=[DEMO_SITES],
+                viewport={"width": 1280, "height": 800},
+                goto_kwargs={"wait_until": "load", "timeout": 20000},
+            ) as page:
                 try:
                     page.wait_for_load_state("networkidle", timeout=5000)
                 except Exception:
@@ -95,8 +57,6 @@ def render(html: str | None, source: str | None, out_path: str) -> None:
                     )
                 else:
                     page.screenshot(path=out_path, full_page=True)
-            finally:
-                browser.close()
     finally:
         if temp_path:
             try:

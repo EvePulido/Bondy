@@ -6,12 +6,16 @@ the page is aborted, so the scan cannot be used for SSRF.
 """
 
 import json
-import os
 import sys
-import tempfile
 from pathlib import Path
 
 from playwright.sync_api import sync_playwright
+
+try:
+    from bondy.app_utils.browser import open_page
+except ImportError:  # run as a standalone script: put the package root on sys.path
+    sys.path.insert(0, str(Path(__file__).resolve().parents[5]))
+    from bondy.app_utils.browser import open_page
 
 AXE_PATH = Path(__file__).parent / "axe.min.js"
 AXE_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa", "best-practice"]
@@ -94,37 +98,16 @@ def _unnamed_interactive_nodes(page) -> list[dict]:
 def scan(html: str) -> dict:
     axe_source = AXE_PATH.read_text(encoding="utf-8")
 
-    fd, temp_path = tempfile.mkstemp(suffix=".html")
-    with os.fdopen(fd, "w", encoding="utf-8") as f:
-        f.write(html)
+    with sync_playwright() as p:
+        # open_page aborts every request except the temp file, data: and about:
+        with open_page(p, html=html) as page:
+            page.add_script_tag(content=axe_source)
 
-    try:
-        with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
-            try:
-                page = browser.new_page()
-                # Never let the audited page reach the network
-                page.route(
-                    "**/*",
-                    lambda route: route.continue_()
-                    if route.request.url.startswith(("file:", "data:", "about:"))
-                    else route.abort(),
-                )
-                page.goto(Path(temp_path).as_uri())
-                page.add_script_tag(content=axe_source)
-
-                raw = page.evaluate(
-                    "tags => axe.run(document, {runOnly: {type: 'tag', values: tags}})",
-                    AXE_TAGS,
-                )
-                unnamed = _unnamed_interactive_nodes(page)
-            finally:
-                browser.close()
-    finally:
-        try:
-            os.remove(temp_path)
-        except OSError:
-            pass
+            raw = page.evaluate(
+                "tags => axe.run(document, {runOnly: {type: 'tag', values: tags}})",
+                AXE_TAGS,
+            )
+            unnamed = _unnamed_interactive_nodes(page)
 
     violations = []
     for rule in raw.get("violations", []):
