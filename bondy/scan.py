@@ -17,10 +17,12 @@ from typing import Any
 
 from bondy.app_utils.browser import INSTALL_COMMAND, BrowserUnavailableError
 from bondy.app_utils.security import validate_input_before_audit
+from bondy.core.checks import check_wcag
 from bondy.resources import SKILLS_DIR
 
 MAX_FILE_BYTES = 2 * 1024 * 1024  # larger files are skipped with a note
 SEVERITY_RANK = {"warning": 1, "critical": 2}
+MAX_PAGES_SKIP = "--max-pages limit reached"
 
 Scanner = Callable[[str], list[dict]]
 
@@ -135,7 +137,7 @@ def _run_contrast(html: str) -> list[dict]:
     return [
         _finding(
             "contrast",
-            ["1.4.3"],
+            check_wcag("contrast"),
             "critical",
             f"Contrast {i.get('contrast_ratio')}:1 is below {i.get('required')}:1",
             selector=i.get("selector"),
@@ -153,7 +155,7 @@ def _run_focus_trap(html: str) -> list[dict]:
     return [
         _finding(
             "focus-trap",
-            ["2.1.2"],
+            check_wcag("focus-trap"),
             "critical",
             "Keyboard focus is trapped in a small set of elements",
             selectors=r.get("involved_selectors", []),
@@ -164,7 +166,7 @@ def _run_focus_trap(html: str) -> list[dict]:
 def _run_focus_order(html: str) -> list[dict]:
     mod = _load_script("focus-order-validator", "focus_order.py")
     return [
-        _finding("focus-order", ["2.4.3"], "warning", a)
+        _finding("focus-order", check_wcag("focus-order"), "warning", a)
         for a in mod.evaluate_focus_order(html).get("anomalies", [])
     ]
 
@@ -176,7 +178,7 @@ def _run_lang(html: str) -> list[dict]:
     if r["present"] and r["valid"]:
         return []
     why = "is missing" if not r["present"] else f"is invalid ({r['value']!r})"
-    return [_finding("lang", ["3.1.1"], "critical", f"<html lang> {why}")]
+    return [_finding("lang", check_wcag("lang"), "critical", f"<html lang> {why}")]
 
 
 def _run_labels(html: str) -> list[dict]:
@@ -184,7 +186,7 @@ def _run_labels(html: str) -> list[dict]:
     return [
         _finding(
             "labels",
-            ["1.3.1", "4.1.2"],
+            check_wcag("labels"),
             "critical",
             f"Form control '{i['selector']}' has no accessible label",
             selector=i["selector"],
@@ -199,7 +201,7 @@ def _run_names(html: str) -> list[dict]:
     return [
         _finding(
             "accessible-name",
-            ["2.4.4", "4.1.2"],
+            check_wcag("accessible-name"),
             "critical",
             f"<{i['type']}> '{i['selector']}' has no accessible name",
             selector=i["selector"],
@@ -224,7 +226,7 @@ def _run_img_alt(html: str) -> list[dict]:
         out.append(
             _finding(
                 "img-alt",
-                ["1.1.1"],
+                check_wcag("img-alt"),
                 "critical",
                 "<img> has no alt attribute",
                 nodes=[{"html": tag[:300]}],
@@ -319,15 +321,20 @@ def scan_path(
     checks: Iterable[str] = (),
     scanners: dict[str, Scanner] | None = None,
     force_static: bool = False,
+    max_files: int | None = None,
 ) -> list[FileResult]:
+    """Scans ``target``. Files beyond ``max_files`` are listed as skipped."""
     results: list[FileResult] = []
     active = dict(scanners or SCANNERS)
     # Reason the browser scanners were dropped; set on the first launch failure
     # so later files do not retry (and re-fail) the launch for every scanner.
     browser_down: str | None = STATIC_FORCED if force_static else None
-    for path in discover(target, include, exclude):
+    for index, path in enumerate(discover(target, include, exclude)):
         result = FileResult(path=str(path))
         results.append(result)
+        if max_files is not None and index >= max_files:
+            result.skipped = f"{MAX_PAGES_SKIP} ({max_files})"
+            continue
         try:
             if path.stat().st_size > MAX_FILE_BYTES:
                 result.skipped = f"larger than {MAX_FILE_BYTES // (1024 * 1024)} MB"

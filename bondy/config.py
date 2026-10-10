@@ -52,6 +52,41 @@ def _to_str_list(value: Any, where: str) -> list[str]:
     raise ConfigError(f"{where}: expected a list of strings, got {value!r}.")
 
 
+def _number(
+    kind: type, *, minimum: float, optional: bool = False, zero_is_none: bool = True
+):
+    """Converter for ints/floats.
+
+    ``optional`` accepts "" as None; ``zero_is_none`` also maps 0 to None
+    ("no limit"). Prices use optional without zero_is_none (0 is a valid price).
+    """
+
+    def convert(value: Any, where: str):
+        if isinstance(value, bool):
+            raise ConfigError(f"{where}: expected a number, got {value!r}.")
+        if isinstance(value, str):
+            text = value.strip()
+            if optional and text == "":
+                return None
+            try:
+                value = kind(text)
+            except ValueError:
+                raise ConfigError(
+                    f"{where}: expected a number, got {value!r}."
+                ) from None
+        elif isinstance(value, int | float):
+            value = kind(value)
+        else:
+            raise ConfigError(f"{where}: expected a number, got {value!r}.")
+        if optional and zero_is_none and value == 0:
+            return None
+        if value < minimum:
+            raise ConfigError(f"{where}: must be >= {minimum:g}; got {value!r}.")
+        return value
+
+    return convert
+
+
 def _choice(*options: str):
     def convert(value: Any, where: str) -> str:
         text = _to_str(value, where).strip().lower()
@@ -82,6 +117,36 @@ _FIELDS: dict[str, tuple[Any, str | None, Any]] = {
         "BONDY_EXCLUDE",
         ["node_modules/**", ".git/**", "dist/**", "build/**"],
     ),
+    # Images per LLM request (semantic stage).
+    "batch_size": (_number(int, minimum=1), "BONDY_BATCH_SIZE", 8),
+    # Hard limits; None (0 or empty) means unlimited. On reaching one the scan
+    # stops and returns a PARTIAL result. max_requests has a safe default of 50;
+    # pass 0 to remove it.
+    "max_requests": (
+        _number(int, minimum=1, optional=True),
+        "BONDY_MAX_REQUESTS",
+        50,
+    ),
+    "max_usd": (_number(float, minimum=0, optional=True), "BONDY_MAX_USD", None),
+    "max_pages": (_number(int, minimum=1, optional=True), "BONDY_MAX_PAGES", None),
+    "max_images": (_number(int, minimum=1, optional=True), "BONDY_MAX_IMAGES", None),
+    # Prices in USD per million tokens. No defaults: Bondy does not know your
+    # model's price. Without them cost is reported as "not available".
+    "price_input_per_mtok": (
+        _number(float, minimum=0, optional=True, zero_is_none=False),
+        "BONDY_PRICE_INPUT_PER_MTOK",
+        None,
+    ),
+    "price_output_per_mtok": (
+        _number(float, minimum=0, optional=True, zero_is_none=False),
+        "BONDY_PRICE_OUTPUT_PER_MTOK",
+        None,
+    ),
+    # Download http(s) images (public hosts only) so the model can see them.
+    "remote_images": (_to_bool, "BONDY_REMOTE_IMAGES", True),
+    # Rough input tokens one image costs (used only by estimate/dry-run and the
+    # pre-request budget check; real usage is read from the provider).
+    "tokens_per_image": (_number(int, minimum=1), "BONDY_TOKENS_PER_IMAGE", 1100),
 }
 
 
@@ -99,6 +164,15 @@ class Settings:
     checks: list[str]
     include: list[str]
     exclude: list[str]
+    batch_size: int
+    max_requests: int | None
+    max_usd: float | None
+    max_pages: int | None
+    max_images: int | None
+    price_input_per_mtok: float | None
+    price_output_per_mtok: float | None
+    remote_images: bool
+    tokens_per_image: int
     api_key: str | None = field(default=None, repr=False)  # never printed
     sources: dict[str, str] = field(default_factory=dict)
     config_path: Path | None = None

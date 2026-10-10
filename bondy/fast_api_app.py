@@ -36,6 +36,7 @@ from bondy.app_utils.audit_schema import parse_audit_response
 from bondy.app_utils.security import validate_input_before_audit
 from bondy.app_utils.telemetry import setup_telemetry
 from bondy.app_utils.typing import Feedback
+from bondy.core.checks import all_criteria_instruction
 from bondy.resources import AXE_SCAN_SCRIPT, WEB_DIR
 
 setup_telemetry()
@@ -240,7 +241,7 @@ async def run_audit(req: AuditRequest):
                 checks_str = ", ".join(req.enabled_checks)
                 extra_instruction = f"Only audit the following criteria: {checks_str}. Ignore all other criteria."
             else:
-                extra_instruction = "Audit all criteria (WCAG 1.1.1, WCAG 1.3.1, WCAG 1.4.3, WCAG 2.4.4, WCAG 3.1.1, WCAG 2.1.2, WCAG 2.4.3)."
+                extra_instruction = all_criteria_instruction()
 
             extra_instruction += _skip_note(req.enabled_checks)
 
