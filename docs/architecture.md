@@ -1,95 +1,149 @@
-# Bondy — Technical Architecture & Design Specification
+# Bondy — Architecture
 
-This document unifies the project vision, threat modeling, accessibility specifications (WCAG 2.2 AA), and the multi-agent system architecture for **Bondy** using **google-adk 2.0** and **agents-cli**.
+This document describes how Bondy works **today** (v0.1.1) and marks what is legacy. For how to install and use it, see the [README](../README.md); for the history and pending work, see [improvement-plan.md](improvement-plan.md) and [CHANGELOG.md](../CHANGELOG.md).
 
 ---
 
-## 1. Problem Statement & WebAIM Million Justification
+## 1. Problem statement and WebAIM Million justification
 
-Manual accessibility audits (WCAG 2.2 AA) are resource-intensive, and static code analyzers (Lighthouses, linters) only check for the presence of attributes (e.g., "does an alt attribute exist?") rather than their quality or semantic correctness.
+Manual accessibility audits (WCAG 2.2 AA) are resource-intensive, and static code analyzers (Lighthouse, linters) only check for the presence of attributes (e.g., "does an alt attribute exist?") rather than their quality or semantic correctness.
 
 Bondy targets the **6 main error categories representing 96% of actual accessibility issues** on the web, based on the **WebAIM Million 2026** report:
 
-| WebAIM Million Category | % of Pages | Responsible Agent Skill | Skill Type | WCAG Criterion |
+| WebAIM Million Category | % of Pages | Scanner (script under `bondy/resources/skills/`) | Type | WCAG Criterion |
 | :--- | :--- | :--- | :--- | :--- |
-| Low Contrast Text | 83.9% | `text-contrast-calculator` | Playwright Simulation (Computed Styles) | 1.4.3 |
-| Missing Alt Text | 53.1% | `alt-text-quality-analyzer` | Gemini Multimodal Vision | 1.1.1 |
-| Missing Labels | 51.0% | `form-labels-validator` | Deterministic (DOM Parsing) | 1.3.1 / 4.1.2 |
-| Empty Links | 46.3% | `interactive-elements-validator` | Deterministic (DOM Parsing) | 2.4.4 / 4.1.2 |
-| Empty Buttons | 30.6% | `interactive-elements-validator` | Deterministic (DOM Parsing) | 2.4.4 / 4.1.2 |
-| Missing Language | 13.5% | `document-language-validator` | Deterministic (DOM Parsing) | 3.1.1 |
+| Low Contrast Text | 83.9% | `text-contrast-calculator` | Playwright (computed styles) | 1.4.3 |
+| Missing Alt Text | 53.1% | semantic image stage (`bondy/core/semantic.py`) + HTML `img-alt` check | Gemini vision (optional) + deterministic | 1.1.1 |
+| Missing Labels | 51.0% | `form-labels-validator` | Deterministic (DOM parsing) | 1.3.1 / 4.1.2 |
+| Empty Links | 46.3% | `interactive-elements-validator` | Deterministic (DOM parsing) | 2.4.4 / 4.1.2 |
+| Empty Buttons | 30.6% | `interactive-elements-validator` | Deterministic (DOM parsing) | 2.4.4 / 4.1.2 |
+| Missing Language | 13.5% | `document-language-validator` | Deterministic (DOM parsing) | 3.1.1 |
 
-Additionally, Bondy implements three crucial dynamic checking skills:
-* `focus-order-validator` (Deterministic - Playwright) [2.4.3]
-* `focus-trap-detector` (Deterministic - Playwright) [2.1.2]
-* `image-decorator-classifier` (Gemini Multimodal Vision) [1.1.1]
-* `suggestion-fix-generator` (Gemini Text Refactoring) [N/A]
+Additional dynamic checks:
+
+* `focus-order-validator` (Playwright) [2.4.3]
+* `focus-trap-detector` (Playwright) [2.1.2]
+* `axe-accessibility-scanner` (Playwright + axe-core 4.10.2, WCAG 2.0/2.1/2.2 A/AA, plus Chromium's accessibility tree)
+
+The authoritative list of checks and their WCAG mapping is `bondy/core/checks.py` (also served at `GET /api/checks`).
 
 ---
 
-## 2. Agent Architecture (ADK 2.0)
+## 2. Current architecture: a code-driven pipeline
 
-To avoid Vertex AI rate limits (429 RESOURCE_EXHAUSTED) caused by concurrent subagents, the architecture was simplified and optimized into a **single LlmAgent** design. 
-
-The `BondyAccessibilityAgent` acts as a monolithic orchestrator equipped with a robust `SkillToolset`. It sequentially evaluates the input source and executes its toolkit.
+Bondy does **not** use an LLM agent to decide what to do. Code drives the order of steps and makes the final decision; the model is only asked for what code cannot decide (what an image shows, whether it is decorative, a draft of the alt text). The `bondy/core/` package has no FastAPI, ADK or GCP dependency.
 
 ```mermaid
 flowchart TD
-    UI[FastAPI Web Interface] -->|URL or HTML Snippet| SEC{Security Validator}
-    SEC -->|Allowed| AGENT[BondyAccessibilityAgent]
-    SEC -->|Blocked| ERR[HTTP 403 Forbidden]
-    
-    subgraph Agent Runtime
-        AGENT -->|Calls| PLAY[Playwright Simulator]
-        AGENT -->|Calls| DOM[DOM Parsers]
-        AGENT -->|Calls| VISION[Gemini Vision Model]
-        
-        PLAY -.->|Focus Traps, Tab Order & Contrast| AGENT
-        DOM -.->|Labels & Lang Attributes| AGENT
-        VISION -.->|Contextual Alt Text| AGENT
+    CLI["CLI: bondy scan (also action.yml, pre-commit hook)"] --> PIPE
+    UI["Web UI / POST /api/audit (bondy/fast_api_app.py)"] --> SEC{"security.py: path and input validation"}
+    SEC -->|"allowed"| WEB["bondy/core/web_audit.py: run_web_audit"]
+    SEC -->|"blocked"| ERR["HTTP 403"]
+    WEB --> PIPE["bondy/core/pipeline.py: run_scan"]
+
+    subgraph pipeline ["run_scan"]
+        PIPE --> LOAD["discover + load pages (bondy/scan.py), reuse unchanged pages (store.py)"]
+        LOAD --> SEM["semantic image stage (semantic.py + providers/): cache first, then batches to Gemini"]
+        SEM --> SCANNERS["deterministic scanners in ONE shared browser (scan.py, app_utils/browser.py)"]
+        SCANNERS --> MERGE["merge results, build fixes (fixes.py), persist page state"]
     end
-    
-    AGENT -->|Synthesizes Findings & Refactors HTML| JSON_REPORT[JSON Fixes Payload]
-    JSON_REPORT --> UI
+
+    MERGE --> REPORT["bondy/core/report.py: build_report (dedupe, suppress, baseline)"]
+    REPORT --> FORMATS["bondy/core/formats.py: terminal, json, markdown, html, sarif"]
+    REPORT --> WEB
+    FORMATS --> CLI
+    WEB -->|"payload: data, stats, notes, mode, partial"| UI
 ```
 
-### Specialized Skills & Responsibilities
-Instead of separate agents, the single agent has access to these deterministic and LLM-based skills:
-* **Image Skills**: Audits images and alt-text quality (WCAG 1.1.1).
-* **Form Skills**: Validates form input labels (WCAG 1.3.1 / 4.1.2).
-* **Keyboard Skills**: Checks keyboard accessibility, focus traps, and logical tab sequences (WCAG 2.1.2 / 2.4.3).
-* **Document Skills**: Handles document language, contrast ratios, and accessible names on links/buttons (WCAG 1.4.3 / 3.1.1 / 2.4.4).
+### Stages
 
-### Common Data Contract Specifications
+1. **Discover and load.** `scan.discover` expands the given paths with `include`/`exclude`; `scan.load_page` reads each file once (that content is what is scanned and hashed). `--since` selects files changed against a git ref; `--changed-only`/`--resume` reuse results saved in the cache.
+2. **Semantic image stage** (only with an API key and without `--no-llm`). `images.py` extracts `<img>` elements; `alt_rules.py` triages in code (decorative signals, redundant prefixes, static alt checks); `redact.py` strips secret-looking values; `semantic.py` sends the rest in batches (`batch_size`, default 8) through an `LLMProvider` (`providers/gemini.py`, or `providers/fake.py` in tests) and validates the JSON answer against a schema. `budget.py` enforces the hard limits (`max_requests` default 50, `max_usd`, `max_pages`, `max_images`) and accounts usage; `estimate.py` powers `bondy estimate` / `--dry-run`. The cache is consulted first, so a bad key fails before any browser starts.
+3. **Deterministic scanners.** `scan.run_scanners` loads the script of each skill folder (`bondy/resources/skills/*/scripts`) and runs axe-core, contrast, focus trap/order, `lang`, form labels, accessible names and the HTML `img-alt` check inside one shared browser (`app_utils/browser.py`). Every network request of the page is aborted except `data:`, `about:` and the scanned file. Without a usable browser (or with `--static`) only the HTML-parsing checks run (static mode) and `notes` says which were skipped.
+4. **Report.** `report.build_report` first merges duplicates (`dedupe.py`), then applies suppressions (`suppress.py`: `bondy-ignore` comments and `[[ignore]]`) and the baseline (`baseline.py`), so both act on the merged item; then `formats.py` renders the single internal `Report` into each output format.
+
+### Deduplication
+
+Several scanners can describe the same problem on the same element (for example axe `link-name`, the accessibility-tree check and the HTML check for an unnamed link). `bondy/core/dedupe.py` merges them conservatively and deterministically: same file, same problem family, and element descriptions that agree; never two items of the same rule; problems of a different nature never merge. The survivor keeps its own fingerprint, takes the worst severity and the union of WCAG criteria, and lists the others in `merged_from` with their original fingerprints.
+
+Consequences:
+
+* **Baselines:** an item is "known" if any of its own or merged fingerprints is in the baseline, so baselines made before the merge keep matching (`Item.all_fingerprints`).
+* **Ignores:** a `bondy-ignore` comment or `[[ignore]]` matching the rule of any merged scanner applies to the merged item (`Item.all_rules`).
+* **Cache:** the cache stores raw findings, never merged ones, so a fresh scan, `--changed-only` and `--resume` give the same result.
+* **Output:** `merged_from` in JSON, `properties.mergedFrom` in SARIF, "Also reported by" in Markdown/HTML and a "Duplicates merged" count in the summary.
+
+### Web UI path
+
+`POST /api/audit` validates the input with `bondy/app_utils/security.py` (only raw HTML or a path inside `examples/`), runs `run_web_audit` in a worker thread (which builds `Settings`, writes pasted HTML to a temporary folder that is always removed, and calls `run_scan`) and adapts the `ScanReport` with `scan_to_payload`. `POST /api/apply-fix` writes one replacement to a file in `examples/` and is restricted to localhost or a valid `X-API-Key` (`BONDY_API_KEY`); `/api/audit` marks which fixes are safe to apply (`before_occurrences`).
+
+### Data contract of `/api/audit`
 
 ```yaml
-AuditFix:   # entry of `data` in /api/audit (bondy/core/web_audit.py, built from the pipeline report)
-  finding_id: string
-  wcag: string
-  severity: enum[critical, warning, info]
-  title: string
-  before: string        # exact copy of the original HTML
-  after: string
-  explanation: string
+# response (bondy/core/web_audit.py: scan_to_payload)
+status: string
+data:                   # list of fixes
+  - finding_id: string
+    wcag: string
+    severity: enum[critical, warning, info]
+    title: string
+    before: string        # exact copy of the original HTML
+    after: string
+    explanation: string
+    before_occurrences: int   # only for patches of local files
+stats: {passes, violations, needs_review} | null   # from axe-core
+source_type: string       # "raw_html" | "local_file"
+file_path: string | null
+notes: [string]
+mode: string              # "llm" | "no-llm"
+partial: bool
 ```
 
 ---
 
-## 3. Left-Shift Security & Guardrails
+## 3. Security guardrails
 
-To meet secure coding standards, the project implements three layers of control:
-
-1. **Deterministic Path and Input Guardrail (`bondy/app_utils/security.py`):**
-   Before launching Playwright browser instances, the input source is evaluated. The agent is restricted from navigating to arbitrary external URLs. It only allows:
-   * Explicit files or directories within the local `examples/` sandbox.
-   * Statically sanitized raw HTML inputs directly pasted by the user.
-2. **Fine-Grained MCP Privileges (`mcp_server/github_server.py`):**
-   The GitHub reader Model Context Protocol server uses read-only calls (`read_github_file` and `list_github_directory`) authorized under a minimal fine-grained personal access token.
-3. **Commit Guardrails (Git Hooks):**
-   Enforces static code analysis checks locally before any commit occurs via Git pre-commit hooks executing `ruff` formatting and linters.
+1. **Input and path guardrail** (`bondy/app_utils/security.py`): for the web UI/API only raw HTML or paths strictly inside `examples/` are accepted; `..` and absolute paths are rejected. The CLI accepts any local path you pass it.
+2. **SSRF guard** (`validate_public_url`): remote image URLs must resolve to public addresses; redirects are re-checked.
+3. **Network confinement** (`bondy/app_utils/browser.py`): audited pages cannot reach the network.
+4. **Secret redaction** (`bondy/core/redact.py`): applied before text is sent to the model, hashed into the cache or written to a report. Pattern based, not a guarantee.
+5. **API key handling** (`bondy/config.py`): `GEMINI_API_KEY` / `GOOGLE_API_KEY` from the environment or the project `.env`, never from `bondy.toml`, never printed.
+6. **Write protection**: `/api/apply-fix` is localhost-only or `X-API-Key`, and refuses ambiguous replacements (409).
+7. **Commit guardrails**: pre-commit runs `ruff` and `ruff format`.
 
 ---
 
-## 4. Development Checklist
+## 4. Legacy and optional components
 
-For details on implementation phases, tasks, and migration progress, please refer directly to the [IMPLEMENTATION_PLAN.md](../IMPLEMENTATION_PLAN.md) file.
+These remain in the repository but are **not** part of the CLI or of the web UI audit path:
+
+| Component | What it is | Status |
+| :--- | :--- | :--- |
+| `bondy/agent.py` | ADK `LlmAgent` (`BondyAccessibilityAgent`) with a `SkillToolset` over `bondy/resources/skills`. | Legacy. Originally the whole product; superseded by the pipeline. The CLI has no `--mode agent` (pending, see `improvement-plan.md`, D1/P4). `tests/integration/test_agent.py` still imports it. |
+| `bondy/app_utils/vision_tools.py`, `render_page.py` | Gemini vision tools and page renderer used by the ADK agent. | Legacy (used by the agent). |
+| `bondy/fast_api_app.py` ADK mount | `get_fast_api_app(...)` from ADK is still the base of the FastAPI app, which is why the `agent` extra is required with `server`. | Legacy dependency; the `/api/audit` route itself does not use the agent. |
+| `mcp_server/github_server.py` | MCP server that reads files from GitHub (`read_github_file`, `list_github_directory`) with a fine-grained token. | Optional (`mcp` extra); not used by the scan pipeline. |
+| Cloud Run deployment (`agents-cli`, Terraform, `gcp` extra, Cloud Logging/OTel) | Deployment of the web app to Google Cloud. | Optional, opt-in telemetry. |
+| `.github/workflows/bondy-audit.yml` | Older CI workflow (`uv sync --all-extras`, ruff, unit tests). | Superseded by `ci.yml`; not verified to be intentionally kept. |
+
+---
+
+## 5. Module map
+
+| Path | Responsibility |
+| :--- | :--- |
+| `bondy/cli.py`, `bondy/__main__.py` | Argument parsing, exit codes, progress/notice, `scan` / `estimate` / `doctor` / `baseline` / `cache`. |
+| `bondy/config.py` | `bondy.toml` + environment + flags (flag > env > file > default); API key resolution (env, `.env`). |
+| `bondy/doctor.py` | Offline environment checks; `--check-key` for one live request. |
+| `bondy/scan.py` | File discovery, page loading, the deterministic scanner runners, static mode. |
+| `bondy/core/pipeline.py` | `run_scan`: order of stages, reuse/resume, limits, exit codes. |
+| `bondy/core/semantic.py`, `alt_rules.py`, `images.py`, `fixes.py` | Image stage: extraction, triage, batching, decision, fix templates. |
+| `bondy/core/providers/` | `LLMProvider` interface, retry/fallback policy, Gemini client, fake provider for tests. |
+| `bondy/core/budget.py`, `estimate.py` | Cost model, hard limits, usage, pre-flight estimate. |
+| `bondy/core/store.py` | On-disk cache (`.bondy/cache`). |
+| `bondy/core/report.py`, `dedupe.py`, `suppress.py`, `baseline.py`, `formats.py` | Internal report, duplicate merging, suppressions, baselines, renderers. |
+| `bondy/core/web_audit.py` | Adapter between the pipeline and the web UI/API. |
+| `bondy/fast_api_app.py`, `bondy/resources/web/` | FastAPI app and static UI. |
+| `action.yml`, `.pre-commit-hooks.yaml`, `docs/ci-example.yml`, `.github/workflows/ci.yml` | CI integration and this repository's own CI. |
+
+Verification status: the pipeline description above was checked against the code of `bondy/core/pipeline.py`, `bondy/core/dedupe.py`, `bondy/core/web_audit.py` and `bondy/fast_api_app.py`; the Cloud deployment path and the Docker image build have not been verified.
