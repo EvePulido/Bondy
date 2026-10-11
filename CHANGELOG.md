@@ -54,7 +54,14 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 - `bondy/core/source.py`: índice de elementos del HTML para asignar línea a hallazgos de axe/selectores.
 - Tests `test_reports.py`, `test_baseline.py`, `test_suppress.py`, `test_redact.py`, `test_ci_files.py`, `test_summary.py`.
 
+- `bondy/core/web_audit.py`: la UI web y `POST /api/audit` usan `run_scan` (pipeline determinista + etapa semantica) en vez del agente ADK. `scan_to_payload` es un adaptador puro `ScanReport` -> contrato de la UI; `run_web_audit` escribe `raw_html` en un directorio temporal que siempre se elimina. Sin API key (o con `BONDY_NO_LLM`) corre en modo no-llm y devuelve la nota en `notes`.
+- `/api/audit` anade a la respuesta `notes`, `mode` y `partial` (retrocompatible); `stats` sale del `axe` del propio pipeline (`FileResult.axe_stats`), sin segunda ejecucion.
+- `GET /api/checks` y `bondy.core.checks` (`GROUPS`, `resolve_criteria`, `describe_checks`): unica fuente del mapeo checks -> WCAG. `enabled_checks` acepta ids de grupo (`images`, `forms`, `keyboard`, `contrast`), ids de check con WCAG y criterios (`WCAG 1.1.1`); un valor desconocido es 403.
+- `tests/unit/test_web_audit.py` (FakeProvider, sin red ni cuota).
+
 ### Changed
+- `web/app.js` ya no mapea checks -> WCAG: envia los ids de grupo y muestra las `notes` del servidor; las reglas sin criterio WCAG se etiquetan "Best practice".
+- `/api/audit`: "Apply to File" solo se ofrece para parches reales (fixes de imagen); los hallazgos que solo traen una recomendacion no llevan `before_occurrences`. Una cuota diaria agotada sigue siendo 429; una key rechazada, 500 con mensaje accionable.
 - JSON de `scan`: los hallazgos son ahora uno por elemento afectado (`selector`, `snippet`, `line`, `fix`, `fingerprint`; ya no hay `nodes`/`count`), con rutas relativas a la carpeta escaneada y `/`; nuevas claves `summary`, `baseline`, `suppressions`, `suppressed`.
 - `bondy scan` calcula el exit code sobre los hallazgos nuevos (no baselined ni suprimidos); la lógica de los códigos 0/1/2/3 no cambia.
 - `bondy/scan.py`: `load_page`/`scan_loaded` separan lectura y escaneo; el HTML se lee una sola vez y se hashea (`FileResult.html`, `sha256`, `reused`).
@@ -99,6 +106,7 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 
 ### Removed
 - Modelos sin uso en `agent.py`: `Evidence`, `Finding`, `FixSuggestion`, `FindingsReport`, `FixesReport`.
+- `bondy/fast_api_app.py`: `InMemoryRunner`/agente ADK en `/api/audit`, `_build_fallback_app`, `FALLBACK_MODEL`, `_skip_note`, `_compute_axe_stats` y el bucle de reintentos propio (ahora los cubre la politica unica de `bondy/core/providers`). `bondy/agent.py` y el modo agente no cambian.
 
 ### Pendiente
 
@@ -106,13 +114,13 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 - [ ] Criterios WCAG 2.2 que axe no cubre: 2.4.7 (focus visible sin `outline`) y 1.4.4 (zoom).
 - [ ] Auditar URLs públicas reales (reutilizando `validate_public_url`).
 - [ ] Progreso real por SSE en lugar de la animación de tiempos fijos.
-- [ ] Mapear checks del frontend de forma completa (`forms` -> 1.3.1 + 4.1.2; separar 3.1.1 de `contrast`).
+- [ ] Mapear checks del frontend de forma completa (`forms` -> 1.3.1 + 4.1.2; separar 3.1.1 de `contrast`). El mapeo ya vive solo en `bondy/core/checks.py` (`GROUPS`); falta ajustar los grupos.
 
 **Seguridad**
 - [ ] Aplicar `validate_public_url` en `.agents/skills/text-contrast-calculator/scripts/contrast.py` (`page.goto(url)`).
 - [x] `load_dotenv(override=True)` pisa variables reales del entorno (Cloud Run).
 - [ ] Autenticación para `/feedback` y para los endpoints `/run` que expone `get_fast_api_app`.
-- [ ] Mitigar prompt injection en `req.source` y `raw_html` interpolados en el prompt.
+- [ ] Mitigar prompt injection en `req.source` y `raw_html` interpolados en el prompt. (`/api/audit` ya no interpola `raw_html` en un prompt; queda el contexto de imagen de la etapa semantica, cubierto por `test_semantic.py` y la redaccion de secretos.)
 
 **Calidad y pruebas**
 - [ ] Tests de `security.py` (traversal, rutas absolutas, `..`).

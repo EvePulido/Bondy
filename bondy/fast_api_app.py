@@ -14,6 +14,7 @@
 # ruff: noqa: E402
 import asyncio
 import os
+from pathlib import Path
 
 from dotenv import load_dotenv
 
@@ -24,20 +25,16 @@ load_dotenv(dotenv_path=os.path.join(AGENT_DIR, ".env"), override=False)
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from google.adk.apps import App
 from google.adk.cli.fast_api import get_fast_api_app
-from google.adk.models import Gemini
-from google.adk.runners import InMemoryRunner
-from google.genai import types
 from pydantic import BaseModel
 
-from bondy.agent import app as adk_app
-from bondy.app_utils.audit_schema import parse_audit_response
 from bondy.app_utils.security import validate_input_before_audit
 from bondy.app_utils.telemetry import setup_telemetry
 from bondy.app_utils.typing import Feedback
-from bondy.core.checks import all_criteria_instruction
-from bondy.resources import AXE_SCAN_SCRIPT, WEB_DIR
+from bondy.core.checks import describe_checks
+from bondy.core.providers.base import LLMProvider
+from bondy.core.web_audit import WebAuditError, run_web_audit
+from bondy.resources import WEB_DIR
 
 setup_telemetry()
 # Cloud Logging is opt-in (BONDY_CLOUD_LOGGING=1, needs the `gcp` extra); by
@@ -124,56 +121,10 @@ class ApplyFixRequest(BaseModel):
     after: str
 
 
-_AXE_SCRIPT = str(AXE_SCAN_SCRIPT)
-
-
-def _compute_axe_stats(raw_html: str | None, source: str) -> dict | None:
-    """Runs the deterministic axe baseline and returns real rule counts.
-
-    Returns None if the scan cannot run (e.g. Chromium missing), so the UI can
-    fall back gracefully instead of failing the whole audit.
-    """
-    import importlib.util
-
-    try:
-        if raw_html is None:
-            from bondy.app_utils.security import get_safe_demo_path
-
-            with open(get_safe_demo_path(source), encoding="utf-8") as f:
-                raw_html = f.read()
-
-        spec = importlib.util.spec_from_file_location("bondy_axe_scan", _AXE_SCRIPT)
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        report = module.scan(raw_html)
-        summary = report["summary"]
-        return {
-            "passes": summary["passes"],
-            "violations": summary["violations"],
-            "needs_review": summary["needs_review"],
-        }
-    except Exception as e:
-        logger.warning(f"axe baseline unavailable: {e}")
-        return None
-
-
-# Backup model used when the primary one is overloaded (503). Empty string disables it.
-FALLBACK_MODEL = os.getenv("BONDY_FALLBACK_MODEL", "gemini-3.5-flash-lite")
-
-
-def _build_fallback_app() -> App:
-    """Same agent and tools, running on the backup model."""
-    agent = adk_app.root_agent.model_copy(
-        update={
-            "model": Gemini(
-                model=FALLBACK_MODEL,
-                retry_options=types.HttpRetryOptions(
-                    attempts=5, initial_delay=5, max_delay=60
-                ),
-            )
-        }
-    )
-    return App(root_agent=agent, name="bondy")
+def _audit_provider() -> LLMProvider | None:
+    """Provider for /api/audit. ``None`` = the real one built from the settings
+    (Gemini with the environment's API key); tests override this."""
+    return None
 
 
 def _annotate_before_matches(fixes: list[dict], source: str) -> None:
@@ -194,26 +145,15 @@ def _annotate_before_matches(fixes: list[dict], source: str) -> None:
         fix["before_occurrences"] = content.count(before) if before else 0
 
 
-def _skip_note(enabled_checks: list[str] | None) -> str:
-    """Extra instruction for image-only audits.
-
-    With only WCAG 1.1.1 selected, the axe baseline and the rendered-page visual
-    check add Gemini requests (and quota usage) without adding findings the
-    per-image tools do not already cover, so the agent skips them.
-    """
-    if enabled_checks and {c.strip() for c in enabled_checks} == {"WCAG 1.1.1"}:
-        return (
-            "Skip STEP 1.5 (axe baseline) and STEP 1.7 (analyze_rendered_page): "
-            "they are not needed for an images-only audit. "
-            "Do verify every <img> with verify_image_alt_text and "
-            "classify_image_decorative as instructed."
-        )
-    return ""
-
-
 @app.get("/")
 async def root_ui():
     return FileResponse(WEB_DIR / "index.html")
+
+
+@app.get("/api/checks")
+async def list_checks():
+    """Check categories and their WCAG mapping (single source: core/checks.py)."""
+    return describe_checks()
 
 
 @app.post("/api/audit")
@@ -223,127 +163,32 @@ async def run_audit(req: AuditRequest):
     except ValueError as e:
         return JSONResponse({"status": "error", "message": str(e)}, status_code=403)
 
-    # Real, deterministic rule counts (computed once, outside the LLM retry loop)
-    axe_stats = await asyncio.to_thread(_compute_axe_stats, req.raw_html, req.source)
+    try:
+        # run_scan is synchronous (browser + provider calls): keep the loop free.
+        payload, patch_ids = await asyncio.to_thread(
+            run_web_audit,
+            source=req.source,
+            raw_html=req.raw_html,
+            enabled_checks=req.enabled_checks,
+            repo_root=Path(AGENT_DIR),
+            provider=_audit_provider(),
+        )
+    except WebAuditError as e:
+        return JSONResponse(
+            {"status": "error", "message": e.message}, status_code=e.status
+        )
+    except Exception as e:
+        logger.warning(f"audit failed: {e}")
+        return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
 
-    max_retries = 4
-    use_fallback = False
-    for attempt in range(max_retries):
-        try:
-            runner = InMemoryRunner(
-                app=_build_fallback_app() if use_fallback else adk_app
-            )
-            session = await runner.session_service.create_session(
-                app_name="bondy", user_id="web_user"
-            )
-
-            if req.enabled_checks:
-                checks_str = ", ".join(req.enabled_checks)
-                extra_instruction = f"Only audit the following criteria: {checks_str}. Ignore all other criteria."
-            else:
-                extra_instruction = all_criteria_instruction()
-
-            extra_instruction += _skip_note(req.enabled_checks)
-
-            if req.raw_html:
-                prompt = (
-                    f"Audit the following raw HTML content for accessibility issues:\n\n"
-                    f"{req.raw_html}\n\n"
-                    f"{extra_instruction}"
-                )
-            else:
-                prompt = (
-                    f"Run a full accessibility audit on the demo site at: {req.source}\n"
-                    f"Call read_local_file(file_path='{req.source}') to read the HTML, "
-                    f"then audit the following criteria: {extra_instruction} and return the JSON array of fixes."
-                )
-
-            last_text = None
-            async for event in runner.run_async(
-                user_id="web_user",
-                session_id=session.id,
-                new_message=types.Content(
-                    role="user", parts=[types.Part.from_text(text=prompt)]
-                ),
-            ):
-                # Capture the last text response from the agent
-                if hasattr(event, "content") and event.content and event.content.parts:
-                    for part in event.content.parts:
-                        if hasattr(part, "text") and part.text:
-                            last_text = part.text
-
-            if last_text:
-                try:
-                    fixes = parse_audit_response(last_text)
-                except ValueError as parse_err:
-                    return JSONResponse(
-                        {"status": "error", "message": str(parse_err)},
-                        status_code=500,
-                    )
-
-                source_type = "raw_html" if req.raw_html else "local_file"
-                data = [fix.model_dump() for fix in fixes]
-                if source_type == "local_file":
-                    _annotate_before_matches(data, req.source)
-                return {
-                    "status": "success",
-                    "data": data,
-                    "stats": axe_stats,
-                    "source_type": source_type,
-                    "file_path": req.source if not req.raw_html else None,
-                }
-
-            return JSONResponse(
-                {
-                    "status": "error",
-                    "message": "The AI workflow timed out or did not produce any output. Recovery: Please click 'Run' to try again, or reduce the number of checks if the page is too large.",
-                },
-                status_code=500,
-            )
-
-        except Exception as e:
-            err_msg = str(e)
-            if "PerDay" in err_msg:
-                # Daily free-tier quota: retrying within seconds cannot succeed
-                return JSONResponse(
-                    {
-                        "status": "error",
-                        "message": "Daily Gemini quota exhausted for this API key/model. Recovery: wait for the quota reset, use a billing-enabled key or Vertex AI, or set BONDY_FALLBACK_MODEL to another model.",
-                    },
-                    status_code=429,
-                )
-            is_rate_limit = "429" in err_msg or "RESOURCE_EXHAUSTED" in err_msg
-            is_overloaded = "503" in err_msg or "UNAVAILABLE" in err_msg
-            if is_rate_limit or is_overloaded:
-                if attempt < max_retries - 1:
-                    import re
-
-                    # Exponential backoff for transient overload: 5s, 10s, 20s
-                    wait_sec = 5.0 * (2**attempt)
-                    match = re.search(r"retry in (\d+\.?\d*)s", err_msg)
-                    if match:
-                        wait_sec = float(match.group(1)) + 1.0
-                    elif "retryDelay" in err_msg:
-                        match_delay = re.search(r"retryDelay': '(\d+)s'", err_msg)
-                        if match_delay:
-                            wait_sec = float(match_delay.group(1)) + 1.0
-
-                    reason = "Rate limit (429)" if is_rate_limit else "Model overloaded (503)"
-                    if is_overloaded and FALLBACK_MODEL and not use_fallback:
-                        # Same model keeps failing: switch to the backup model
-                        use_fallback = True
-                        wait_sec = min(wait_sec, 3.0)
-                        reason += f" - switching to fallback model '{FALLBACK_MODEL}'"
-                    logger.warning(
-                        f"{reason}. Retrying in {wait_sec} seconds... (Attempt {attempt + 1}/{max_retries})"
-                    )
-
-                    await asyncio.sleep(wait_sec)
-                    continue
-
-            return JSONResponse(
-                {"status": "error", "message": err_msg}, status_code=500
-            )
+    if payload["source_type"] == "local_file":
+        # Only real patches (image fixes) get an occurrence count, so the UI
+        # never offers "Apply to File" for advice text.
+        _annotate_before_matches(
+            [d for d in payload["data"] if d["finding_id"] in patch_ids],
+            req.source,
+        )
+    return payload
 
 
 from collections import defaultdict

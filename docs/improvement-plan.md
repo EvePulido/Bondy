@@ -398,3 +398,16 @@ Cálculo propio, no medido: ~50k tokens de entrada y ~4k de salida con el flujo 
 | `render_page.py` y hosts públicos | **Solo local**: se eliminó `allow_remote`; las imágenes remotas no aparecen en la captura (las verifican `verify_image_alt_text`/`classify` con su propia validación). |
 | Timeouts globales por escaneo (resto de D6) | Se hacen en la **Fase B**, junto con el navegador compartido. |
 | Flag `--static` | **Hecho**: `--static`, `BONDY_STATIC` o `static` en `bondy.toml`; la nota indica que fue forzado y no sugiere instalar un navegador. |
+
+## Pendientes tras la Fase E (2026-10-10)
+
+Dejados para después por decisión del usuario:
+
+| # | Pendiente | Nota |
+|---|---|---|
+| P1 | ~~**UI web y `/api/audit` sobre `bondy/core`**~~ | **Hecho (2026-10-10)**: `bondy/core/web_audit.py` (adaptador + `run_web_audit`), `GET /api/checks`, mapeo solo en `checks.py`, `app.js` sin mapeo propio. Sin verificar: UI en un navegador real y Gemini real (P2). |
+| P2 | Verificar con **Gemini real** (esquema anidado, timeout en ms, tope ~20 MB, textos de error de key, calidad del alt funcional) | Necesita key de pago o cuota nueva. |
+| P3 | Verificar **Docker** y **CI de GitHub** con el árbol nuevo; ejecutar la action y el hook en un repo real | Fijar `owner/repo@tag` de la action y URL del hook. |
+| P4 | `bondy scan` con varias rutas, progreso en vivo, aviso en ejecución de qué se envía, `--mode agent` en la CLI | Mejoras de uso. |
+| P5 | Fase C restante, Fase F (formato de archivos viejos, `ty` en CI, matriz Windows/macOS/Linux), E7 plantillas, B8 Batch API, `demo_sites` -> `examples/` | Ver secciones 4 y 5. |
+| P6 | Watchdog duro por página | Descartado por ahora; mitigación `--scan-timeout` + `--resume`. |

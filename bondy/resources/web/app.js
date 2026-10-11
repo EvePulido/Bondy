@@ -149,18 +149,9 @@ async function runAudit() {
         return;
     }
 
-    const enabledChecks = [];
-    if (checkedBoxes.includes('images')) enabledChecks.push('WCAG 1.1.1');
-    if (checkedBoxes.includes('forms')) enabledChecks.push('WCAG 1.3.1');
-    if (checkedBoxes.includes('keyboard')) {
-        enabledChecks.push('WCAG 2.4.4');
-        enabledChecks.push('WCAG 2.1.2');
-        enabledChecks.push('WCAG 2.4.3');
-    }
-    if (checkedBoxes.includes('contrast')) {
-        enabledChecks.push('WCAG 1.4.3');
-        enabledChecks.push('WCAG 3.1.1');
-    }
+    // The checkbox values are the server's check-group ids (GET /api/checks):
+    // the checks -> WCAG mapping lives only in bondy/core/checks.py.
+    const enabledChecks = checkedBoxes.slice();
 
     // Hide configuration screen
     const configScreen = document.getElementById('config-screen');
@@ -386,6 +377,14 @@ async function runAudit() {
                 pillsHtml += `<span class="pill">${escapeHtml(label)}</span> `;
             });
 
+            // Server notes (no API key, static mode, partial result...)
+            const notes = Array.isArray(data.notes) ? data.notes : [];
+            const notesHtml = notes.length === 0 ? '' : `
+                <div class="fix-explanation" role="note" style="margin-bottom: 12px;">
+                    ${notes.map(n => `<div>${escapeHtml(n)}</div>`).join('')}
+                </div>
+            `;
+
             // Build findings accordion items
             let findingsHtml = '';
             if (classifiedFixes.length === 0) {
@@ -401,7 +400,7 @@ async function runAudit() {
                     findingsHtml += `
                         <div class="card finding-card">
                             <div class="finding-header" onclick="toggleFinding(this)" role="button" tabindex="0">
-                                <span class="badge wcag">WCAG ${escapeHtml(fix.wcag)}</span>
+                                <span class="badge wcag">${/^\d/.test(fix.wcag) ? 'WCAG ' : ''}${escapeHtml(fix.wcag)}</span>
                                 <span class="badge ${escapeHtml(fix.severity)}">${escapeHtml(fix.severity.charAt(0).toUpperCase() + fix.severity.slice(1))}</span>
                                 <span class="finding-title" title="${escapeHtml(fix.title)}">${escapeHtml(fix.title)}</span>
                                 <span class="material-symbols-outlined chevron open">expand_more</span>
@@ -519,6 +518,7 @@ async function runAudit() {
                         <!-- Findings -->
                         <div>
                             <div class="section-label" style="padding: 0 4px 4px; margin-bottom: 12px;">Findings — ${classifiedFixes.length} issue${classifiedFixes.length !== 1 ? 's' : ''}</div>
+                            ${notesHtml}
                             <div class="stack-sm" style="display: flex; flex-direction: column; gap: 12px;">
                                 ${findingsHtml}
                             </div>

@@ -46,6 +46,8 @@ class FileResult:
     sha256: str | None = None
     # previous result reused because the page (and its images) did not change
     reused: bool = False
+    # axe rule counts {passes, violations, needs_review} when axe ran (else None)
+    axe_stats: dict[str, int] | None = None
 
 
 # ----- Discovery -----
@@ -113,10 +115,16 @@ def _finding(
     }
 
 
+class _AxeFindings(list):
+    """Findings list that also carries axe's real rule counts (``stats``)."""
+
+    stats: dict[str, int] | None = None
+
+
 # ----- Individual scanners: each returns a list of normalized findings -----
 def _run_axe(html: str) -> list[dict]:
     report = _load_script("axe-accessibility-scanner", "axe_scan.py").scan(html)
-    out = [
+    out = _AxeFindings(
         _finding(
             "axe",
             v["wcag"],
@@ -127,7 +135,7 @@ def _run_axe(html: str) -> list[dict]:
             nodes=v["nodes"],
         )
         for v in report["violations"]
-    ]
+    )
     out += [
         _finding(
             "axe-tree",
@@ -138,6 +146,12 @@ def _run_axe(html: str) -> list[dict]:
         )
         for u in report["unnamed_interactive_elements"]
     ]
+    summary = report["summary"]
+    out.stats = {
+        "passes": summary["passes"],
+        "violations": summary["violations"],
+        "needs_review": summary["needs_review"],
+    }
     return out
 
 
@@ -314,8 +328,11 @@ def run_scanners(
     html: str,
     checks: Iterable[str] = (),
     scanners: dict[str, Scanner] | None = None,
+    stats: dict[str, int] | None = None,
 ) -> tuple[list[dict], list[str], dict[str, str]]:
     """Runs every scanner on ``html``. Returns (findings, errors, unavailable).
+
+    ``stats``, when given, is filled with axe's rule counts if axe ran.
 
     A failing scanner is reported in ``errors`` and does not abort the others.
     A scanner that cannot start because no browser exists goes to
@@ -328,7 +345,10 @@ def run_scanners(
     unavailable: dict[str, str] = {}
     for name, run in (scanners or SCANNERS).items():
         try:
-            findings.extend(run(html))
+            found = run(html)
+            findings.extend(found)
+            if stats is not None and getattr(found, "stats", None):
+                stats.update(found.stats)
         except BrowserUnavailableError as e:
             unavailable[name] = str(e)
         except Exception as e:
@@ -388,10 +408,12 @@ def scan_loaded(
                 if n in BROWSER_SCANNERS and n in STATIC_FALLBACKS:
                     fb_name, fb = STATIC_FALLBACKS[n]
                     to_run[fb_name] = fb
+        stats: dict[str, int] = {}
         try:
             result.findings, result.errors, unavailable = run_scanners(
-                result.html or "", checks, to_run
+                result.html or "", checks, to_run, stats
             )
+            result.axe_stats = stats or None
         except KeyboardInterrupt:
             for r in todo[i:]:
                 r.findings, r.errors, r.skipped = [], [], INTERRUPTED_SKIP
