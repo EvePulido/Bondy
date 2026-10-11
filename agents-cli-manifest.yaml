@@ -1,6 +1,6 @@
 name: "bondy"
 acli_version: "0.5.0"
-agent_directory: "app"
+agent_directory: "bondy"
 region: "us-east1"
 base_template: "adk"
 generated_at: "2026-06-21T00:25:22.227764+00:00"

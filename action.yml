@@ -1,0 +1,143 @@
+name: "Bondy accessibility scan"
+description: >-
+  Scan HTML for WCAG issues with Bondy (local, bring-your-own-key) and upload the
+  result to GitHub code scanning as SARIF.
+author: "Bondy"
+
+inputs:
+  path:
+    description: "HTML file or folder to scan, relative to the workspace."
+    required: false
+    default: "."
+  fail-on:
+    description: "Lowest severity that fails the step: critical, warning or never."
+    required: false
+    default: "critical"
+  format:
+    description: "Report format: sarif, json, markdown, html or terminal."
+    required: false
+    default: "sarif"
+  output:
+    description: "File the report is written to."
+    required: false
+    default: "bondy-results.sarif"
+  baseline:
+    description: "Baseline file (see `bondy baseline create`); only NEW findings fail."
+    required: false
+    default: ""
+  changed-only:
+    description: "Re-scan only pages that changed since the last scan (uses the cache)."
+    required: false
+    default: "false"
+  since:
+    description: >-
+      Git ref: scan only files changed against it, e.g. origin/main. The checkout
+      needs enough history (actions/checkout fetch-depth: 0).
+    required: false
+    default: ""
+  no-llm:
+    description: "Deterministic scanners only (no API key, no network)."
+    required: false
+    default: "false"
+  gemini-api-key:
+    description: >-
+      Your own Gemini API key (BYOK), from a repository secret. Without it Bondy
+      runs the deterministic scanners and says so in the report.
+    required: false
+    default: ""
+  install-browser:
+    description: "Install Playwright Chromium (axe, contrast and focus checks need a browser)."
+    required: false
+    default: "true"
+  upload-sarif:
+    description: "Upload the SARIF report to GitHub code scanning."
+    required: false
+    default: "true"
+  python-version:
+    description: "Python used to run Bondy (3.11 to 3.13)."
+    required: false
+    default: "3.12"
+
+outputs:
+  exit-code:
+    description: "Bondy exit code: 0 clean, 1 findings, 2 error, 3 partial."
+    value: ${{ steps.scan.outputs.exit-code }}
+  report:
+    description: "Path of the report file."
+    value: ${{ inputs.output }}
+
+runs:
+  using: "composite"
+  steps:
+    - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Install Bondy
+      shell: bash
+      run: |
+        python -m pip install --disable-pip-version-check "$GITHUB_ACTION_PATH"
+        if [ "$INSTALL_BROWSER" = "true" ]; then
+          python -m playwright install --with-deps chromium
+        fi
+      env:
+        INSTALL_BROWSER: ${{ inputs.install-browser }}
+
+    - name: Scan
+      id: scan
+      shell: bash
+      env:
+        BONDY_IN_PATH: ${{ inputs.path }}
+        BONDY_IN_FAIL_ON: ${{ inputs.fail-on }}
+        BONDY_IN_FORMAT: ${{ inputs.format }}
+        BONDY_IN_OUTPUT: ${{ inputs.output }}
+        BONDY_IN_BASELINE: ${{ inputs.baseline }}
+        BONDY_IN_CHANGED_ONLY: ${{ inputs.changed-only }}
+        BONDY_IN_SINCE: ${{ inputs.since }}
+        BONDY_IN_NO_LLM: ${{ inputs.no-llm }}
+        GEMINI_API_KEY: ${{ inputs.gemini-api-key }}
+      run: |
+        # Inputs reach the command line only through quoted env vars (no
+        # expression injection into the shell script).
+        args=(scan "$BONDY_IN_PATH" --format "$BONDY_IN_FORMAT" \
+              --output "$BONDY_IN_OUTPUT" --fail-on "$BONDY_IN_FAIL_ON")
+        [ -n "$BONDY_IN_BASELINE" ] && args+=(--baseline "$BONDY_IN_BASELINE")
+        [ "$BONDY_IN_CHANGED_ONLY" = "true" ] && args+=(--changed-only)
+        [ -n "$BONDY_IN_SINCE" ] && args+=(--since "$BONDY_IN_SINCE")
+        [ "$BONDY_IN_NO_LLM" = "true" ] && args+=(--no-llm)
+        # GitHub resolves SARIF paths from the repository root: tell Bondy
+        # where the scanned folder sits inside it.
+        prefix=$(python - <<'PY'
+        import os
+        p = os.environ["BONDY_IN_PATH"]
+        d = p if os.path.isdir(p) else os.path.dirname(p) or "."
+        rel = os.path.relpath(os.path.abspath(d), os.getcwd()).replace(os.sep, "/")
+        print("" if rel == "." or rel.startswith("..") else rel)
+        PY
+        )
+        [ -n "$prefix" ] && args+=(--sarif-prefix "$prefix")
+        # GitHub runs `bash -e`: a bare `bondy ...; code=$?` would abort the
+        # script on exit 1 before the code is recorded.
+        code=0
+        bondy "${args[@]}" || code=$?
+        echo "exit-code=$code" >> "$GITHUB_OUTPUT"
+        # Do not fail here: the SARIF must be uploaded first (next steps).
+        exit 0
+
+    # Pinned to the commit of release v4.38.3 (verified with `git ls-remote`
+    # on the official repository). Update it deliberately.
+    - name: Upload SARIF to code scanning
+      if: ${{ always() && inputs.upload-sarif == 'true' && inputs.format == 'sarif' && hashFiles(inputs.output) != '' }}
+      uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+      with:
+        sarif_file: ${{ inputs.output }}
+        category: bondy
+
+    - name: Fail if Bondy reported a problem
+      if: ${{ always() && steps.scan.outputs.exit-code != '' && steps.scan.outputs.exit-code != '0' }}
+      shell: bash
+      env:
+        CODE: ${{ steps.scan.outputs.exit-code }}
+      run: |
+        echo "Bondy exit code $CODE (1 findings, 2 error, 3 partial result)."
+        exit "$CODE"

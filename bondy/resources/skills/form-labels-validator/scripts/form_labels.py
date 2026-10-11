@@ -1,0 +1,90 @@
+import json
+import re
+import sys
+
+
+def check_form_labels(html_str: str) -> list:
+    """
+    Audits form elements and checks for association with an accessible label.
+    """
+    results = []
+
+    # Find all input, select, textarea tags
+    elements = re.finditer(r"<(input|select|textarea)([^>]*)>", html_str, re.IGNORECASE)
+
+    for match in elements:
+        tag_name = match.group(1).lower()
+        attrs = match.group(2)
+
+        # Ignore input types that do not require labels
+        type_match = re.search(r'type\s*=\s*["\']([^"\']+)["\']', attrs, re.IGNORECASE)
+        input_type = type_match.group(1).lower() if type_match else "text"
+
+        if tag_name == "input" and input_type in [
+            "hidden",
+            "submit",
+            "button",
+            "reset",
+            "image",
+        ]:
+            continue
+
+        has_label = False
+        method = None
+
+        # Check aria-label
+        if re.search(r'aria-label\s*=\s*["\']([^"\']+)["\']', attrs, re.IGNORECASE):
+            has_label = True
+            method = "aria-label"
+        # Check aria-labelledby
+        elif re.search(
+            r'aria-labelledby\s*=\s*["\']([^"\']+)["\']', attrs, re.IGNORECASE
+        ):
+            has_label = True
+            method = "aria-labelledby"
+
+        id_match = re.search(r'id\s*=\s*["\']([^"\']+)["\']', attrs, re.IGNORECASE)
+        input_id = id_match.group(1) if id_match else None
+
+        # Check <label for="...">
+        if not has_label and input_id:
+            label_for_pattern = (
+                f"<label[^>]*for\\s*=\\s*[\"']{re.escape(input_id)}[\"'][^>]*>"
+            )
+            if re.search(label_for_pattern, html_str, re.IGNORECASE):
+                has_label = True
+                method = "label[for]"
+
+        # Check implicit <label> wrapping (basic regex approximation for simple demos)
+        if not has_label:
+            wrapper_match = re.search(
+                r"<label[^>]*>.*?<(?:input|select|textarea)[^>]*>.*?</label>",
+                html_str,
+                re.IGNORECASE | re.DOTALL,
+            )
+            if wrapper_match:
+                has_label = True
+                method = "implicit-label"
+
+        selector = tag_name
+        if input_id:
+            selector += f"#{input_id}"
+
+        results.append(
+            {
+                "selector": selector,
+                "input_type": input_type if tag_name == "input" else tag_name,
+                "has_label": has_label,
+                "detected_method": method,
+                # start tag as written in the source (see accessible_name.py)
+                "html": match.group(0)[:300],
+            }
+        )
+
+    return results
+
+
+if __name__ == "__main__":
+    html_input = sys.stdin.read()
+    issues = check_form_labels(html_input)
+    print(json.dumps({"issues": issues}, indent=2))

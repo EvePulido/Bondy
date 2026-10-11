@@ -49,7 +49,7 @@ def start_server() -> subprocess.Popen[str]:
         sys.executable,
         "-m",
         "uvicorn",
-        "app.fast_api_app:app",
+        "bondy.fast_api_app:app",
         "--host",
         "0.0.0.0",
         "--port",
@@ -119,7 +119,7 @@ def test_chat_stream(server_fixture: subprocess.Popen[str]) -> None:
     user_id = "test_user_123"
     session_data = {"state": {"preferred_language": "English", "visit_count": 1}}
 
-    session_url = f"{BASE_URL}/apps/app/users/{user_id}/sessions"
+    session_url = f"{BASE_URL}/apps/bondy/users/{user_id}/sessions"
     session_response = requests.post(
         session_url,
         headers=HEADERS,
@@ -132,7 +132,7 @@ def test_chat_stream(server_fixture: subprocess.Popen[str]) -> None:
 
     # Then send chat message
     data = {
-        "app_name": "app",
+        "app_name": "bondy",
         "user_id": user_id,
         "session_id": session_id,
         "new_message": {
@@ -183,9 +183,9 @@ def test_chat_stream_error_handling(server_fixture: subprocess.Popen[str]) -> No
         STREAM_URL, headers=HEADERS, json=data, stream=True, timeout=10
     )
 
-    assert (
-        response.status_code == 422
-    ), f"Expected status code 422, got {response.status_code}"
+    assert response.status_code == 422, (
+        f"Expected status code 422, got {response.status_code}"
+    )
     logger.info("Error handling test completed successfully")
 
 

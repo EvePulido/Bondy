@@ -63,20 +63,12 @@ Instead of separate agents, the single agent has access to these deterministic a
 ### Common Data Contract Specifications
 
 ```yaml
-Finding:
-  id: string (uuid)
-  skill: string
-  wcag_criterion: string
-  severity: enum[critical, warning, info]
-  selector: string
-  description: string
-  evidence:
-    current_value: string
-    expected_value: string | null
-
-FixSuggestion:
+AuditFix:   # entry of `data` in /api/audit (bondy/core/web_audit.py, built from the pipeline report)
   finding_id: string
-  before: string
+  wcag: string
+  severity: enum[critical, warning, info]
+  title: string
+  before: string        # exact copy of the original HTML
   after: string
   explanation: string
 ```
@@ -87,9 +79,9 @@ FixSuggestion:
 
 To meet secure coding standards, the project implements three layers of control:
 
-1. **Deterministic Path and Input Guardrail (`app/app_utils/security.py`):**
+1. **Deterministic Path and Input Guardrail (`bondy/app_utils/security.py`):**
    Before launching Playwright browser instances, the input source is evaluated. The agent is restricted from navigating to arbitrary external URLs. It only allows:
-   * Explicit files or directories within the local `demo_sites/` sandbox.
+   * Explicit files or directories within the local `examples/` sandbox.
    * Statically sanitized raw HTML inputs directly pasted by the user.
 2. **Fine-Grained MCP Privileges (`mcp_server/github_server.py`):**
    The GitHub reader Model Context Protocol server uses read-only calls (`read_github_file` and `list_github_directory`) authorized under a minimal fine-grained personal access token.
