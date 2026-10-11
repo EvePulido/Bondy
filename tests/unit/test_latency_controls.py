@@ -1,7 +1,7 @@
 from unittest.mock import MagicMock, patch
 
 from bondy.app_utils import vision_tools
-from bondy.app_utils.vision_tools import _quota_retry_delay
+from bondy.core.alt_rules import quota_retry_delay as _quota_retry_delay
 
 
 def test_quota_delay_parses_retry_in_seconds():
@@ -28,7 +28,7 @@ def test_generate_retries_same_model_once_on_quota_error():
         assert vision_tools._generate(["x"]) == "done"
     sleep.assert_called_once()
     models = [c.kwargs["model"] for c in client.models.generate_content.call_args_list]
-    assert models[0] == models[1] == vision_tools.VISION_MODEL
+    assert models[0] == models[1] == vision_tools._models()[0]
 
 
 def test_daily_quota_is_not_retried():

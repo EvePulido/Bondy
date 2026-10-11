@@ -39,6 +39,7 @@ def test_static_mode_runs_html_checks_and_reports_omissions(tmp_path, monkeypatc
         alt = [f for f in r.findings if f["scanner"] == "img-alt"]
         assert len(alt) == 1  # only <img src="a.png"> lacks alt
     note = static_mode_note(results)
+    assert note is not None
     assert "STATIC MODE" in note and "python -m playwright install chromium" in note
     assert "axe" in note and "contrast" in note
 

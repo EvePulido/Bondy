@@ -20,6 +20,7 @@ from google.adk.tools.skill_toolset import SkillToolset
 from google.genai import types
 
 # Load external WCAG guidelines and fix patterns
+from bondy.config import load_settings_lenient
 from bondy.resources import FIX_PATTERNS_PATH, SKILLS_DIR
 
 with open(FIX_PATTERNS_PATH, encoding="utf-8") as f:
@@ -67,7 +68,8 @@ all_tools = SkillToolset(skills=all_skills)
 root_agent = LlmAgent(
     name="BondyAccessibilityAgent",
     model=Gemini(
-        model="gemini-flash-latest",
+        # BONDY_MODEL / bondy.toml `model` (default gemini-flash-latest)
+        model=load_settings_lenient().model,
         # Retry only the failed request (429/503) instead of restarting the audit
         retry_options=types.HttpRetryOptions(attempts=5, initial_delay=5, max_delay=60),
     ),

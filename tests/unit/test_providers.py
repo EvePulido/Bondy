@@ -57,7 +57,8 @@ def test_max_attempts_caps_retries():
 
 
 def test_usage_is_reported_or_none():
-    assert FakeProvider().generate(REQ).usage.input_tokens == 1000
+    usage = FakeProvider().generate(REQ).usage
+    assert usage is not None and usage.input_tokens == 1000
     assert FakeProvider(tokens_per_request=None).generate(REQ).usage is None
 
 
@@ -106,5 +107,6 @@ def test_gemini_provider_reads_usage_and_uses_vision_model():
 
     p = GeminiProvider("k", "text-m", "vision-m", client=Client())
     r = p.generate(LLMRequest(parts=["x", MediaPart(b"\x89PNG", "image/png")]))
+    assert r.usage is not None
     assert seen == ["vision-m"] and r.usage.output_tokens == 6
     assert p.generate(LLMRequest(parts=["x"])).model == "text-m"

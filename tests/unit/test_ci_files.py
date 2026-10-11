@@ -30,6 +30,31 @@ def test_action_declares_the_documented_inputs_and_pins_third_party_actions():
         assert re.search(r"@[0-9a-f]{40}$", u.split()[0]), u
 
 
+def test_action_skips_sarif_upload_for_read_only_tokens():
+    """Fork/Dependabot PRs cannot write code scanning: skip, keep an artifact."""
+    steps = load("action.yml")["runs"]["steps"]
+    (upload,) = [
+        s for s in steps if "github/codeql-action/upload-sarif@" in s.get("uses", "")
+    ]
+    assert upload["continue-on-error"] is True
+    cond = upload["if"]
+    assert "github.event.pull_request.head.repo.full_name == github.repository" in cond
+    assert "dependabot[bot]" in cond and "github.event_name != 'pull_request'" in cond
+    (artifact,) = [s for s in steps if "actions/upload-artifact@" in s.get("uses", "")]
+    assert "head.repo.full_name != github.repository" in artifact["if"]
+    # the exit code is still propagated after the (possibly skipped) upload
+    assert steps[-1]["name"].startswith("Fail if Bondy reported")
+
+
+def test_ci_type_checks_bondy_and_tests():
+    runs = [
+        s.get("run", "")
+        for job in load(".github/workflows/ci.yml")["jobs"].values()
+        for s in job["steps"]
+    ]
+    assert "uv run ty check bondy tests" in runs
+
+
 def test_action_never_interpolates_inputs_into_shell_code():
     text = (ROOT / "action.yml").read_text(encoding="utf-8")
     for block in re.findall(r"run: \|\n((?:[ ]{8}.*\n?)+)", text):

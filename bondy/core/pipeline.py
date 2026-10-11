@@ -17,7 +17,7 @@ import os
 import re
 import subprocess
 import time
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import asdict
 from functools import partial
 from pathlib import Path
@@ -60,6 +60,7 @@ from bondy.core.suppress import check_inline_syntax
 from bondy.scan import (
     INTERRUPTED_SKIP,
     MAX_PAGES_SKIP,
+    PAGE_TIMEOUT_SKIP,
     SCAN_TIMEOUT_SKIP,
     SCANNERS,
     FileResult,
@@ -252,7 +253,7 @@ def changed_since(root: Path, ref: str) -> set[str]:
 
 
 def config_fingerprint(
-    settings: Settings, llm: bool, scanners: dict[str, Scanner] | None
+    settings: Settings, llm: bool, scanners: Mapping[str, Scanner] | None
 ) -> str:
     """Anything that changes what a page's result would be (B9/B10)."""
     parts = [
@@ -323,7 +324,7 @@ def run_scan(
     target: Target,
     settings: Settings,
     *,
-    scanners: dict[str, Scanner] | None = None,
+    scanners: Mapping[str, Scanner] | None = None,
     provider: LLMProvider | None = None,
     loader: ImageLoader | None = None,
     progress: Callable[[str], None] | None = None,
@@ -497,9 +498,11 @@ def run_scan(
         _apply_image_results(report, todo_occs, stage.outcomes, todo)
     interrupted = [r for r in results if r.skipped == INTERRUPTED_SKIP]
     timed_out = [r for r in results if r.skipped == SCAN_TIMEOUT_SKIP]
+    hung = [r for r in results if r.skipped and r.skipped.startswith(PAGE_TIMEOUT_SKIP)]
     for pages, reason in (
         (interrupted, INTERRUPTED_SKIP),
         (timed_out, SCAN_TIMEOUT_SKIP),
+        (hung, PAGE_TIMEOUT_SKIP),
     ):
         if pages:
             usage.partial = True

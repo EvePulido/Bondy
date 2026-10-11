@@ -14,7 +14,6 @@ keys keep the contract the UI always had.
 
 from __future__ import annotations
 
-import os
 import tempfile
 from collections.abc import Mapping
 from pathlib import Path
@@ -185,9 +184,7 @@ def run_web_audit(
         flags["no_llm"] = no_llm
 
     try:
-        settings = load_settings(
-            flags=flags, env=os.environ if env is None else env, start_dir=repo_root
-        )
+        settings = load_settings(flags=flags, env=env, start_dir=repo_root)
         if raw_html is not None:
             # The page is only ever read from this private folder, which is
             # always removed (also when the scan fails).

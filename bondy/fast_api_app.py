@@ -11,23 +11,17 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-# ruff: noqa: E402
 import asyncio
-import os
+import logging
+from collections import defaultdict
 from pathlib import Path
-
-from dotenv import load_dotenv
-
-AGENT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-# override=False: variables already set in the environment win over .env
-load_dotenv(dotenv_path=os.path.join(AGENT_DIR, ".env"), override=False)
 
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from google.adk.cli.fast_api import get_fast_api_app
 from pydantic import BaseModel
 
+from bondy import config
 from bondy.app_utils.security import validate_input_before_audit
 from bondy.app_utils.telemetry import setup_telemetry
 from bondy.app_utils.typing import Feedback
@@ -36,13 +30,22 @@ from bondy.core.providers.base import LLMProvider
 from bondy.core.web_audit import WebAuditError, run_web_audit
 from bondy.resources import WEB_DIR
 
+AGENT_DIR = str(Path(__file__).absolute().parent.parent)
+# The project's .env is no longer loaded wholesale: only the allowlisted
+# variables (BONDY_*, GEMINI_*/GOOGLE_*, telemetry...) reach os.environ, and
+# variables already set win. All Bondy settings are then read through
+# bondy.config (load_settings / load_server_settings), never from os.environ.
+config.export_dotenv_to_environ(Path(AGENT_DIR) / config.DOTENV_FILENAME)
+
 setup_telemetry()
+_server = config.load_server_settings()
+for _msg in _server.deprecations:
+    logging.warning(_msg)
+
 # Cloud Logging is opt-in (BONDY_CLOUD_LOGGING=1, needs the `gcp` extra); by
 # default feedback and warnings go to the standard Python logger only.
-import logging
-
 logger = logging.getLogger(__name__)
-if os.getenv("BONDY_CLOUD_LOGGING") == "1":
+if _server.cloud_logging:
     try:
         import google.auth
         from google.cloud import (  # ty: ignore[unresolved-import]
@@ -55,26 +58,94 @@ if os.getenv("BONDY_CLOUD_LOGGING") == "1":
         logging.warning(f"Cloud Logging unavailable, using stdlib logging: {e}")
 else:
     logging.basicConfig(level=logging.INFO)
-allow_origins = (
-    os.getenv("ALLOW_ORIGINS", "").split(",") if os.getenv("ALLOW_ORIGINS") else None
-)
+allow_origins = _server.allow_origins
 
 # Artifact bucket for ADK (created by Terraform, passed via env var)
-logs_bucket_name = os.environ.get("LOGS_BUCKET_NAME")
+logs_bucket_name = _server.logs_bucket
 
 # In-memory session configuration - no persistent storage
 session_service_uri = None
 
 artifact_service_uri = f"gs://{logs_bucket_name}" if logs_bucket_name else None
 
-app: FastAPI = get_fast_api_app(
-    agents_dir=AGENT_DIR,
-    web=False,
-    artifact_service_uri=artifact_service_uri,
-    allow_origins=allow_origins,
-    session_service_uri=session_service_uri,
-    otel_to_cloud=False,
-)
+_LOCAL_HOSTS = ("127.0.0.1", "::1", "localhost")
+# Paths that keep their own policy (UI, /api/*, feedback, health) when the ADK
+# routes are mounted; everything else belongs to ADK and is guarded.
+_PUBLIC_PATHS = ("/", "/feedback", "/health")
+_PUBLIC_PREFIXES = ("/static/", "/api/")
+
+
+def _agent_api_enabled() -> bool:
+    """ADK dev-server routes (/run, /run_sse, /list-apps, sessions, artifacts,
+    /docs...) are opt-in: they let any caller drive the agent with the owner's
+    Gemini key."""
+    return config.load_server_settings().enable_agent_api
+
+
+def _is_authorized(headers: dict[str, str], client_host: str | None) -> bool:
+    """``BONDY_APPLY_TOKEN`` (legacy alias ``BONDY_API_KEY``) set -> require it
+    in ``X-API-Key``; otherwise only requests from the local machine. It is not
+    the Gemini key."""
+    api_key = config.load_server_settings().apply_token
+    if api_key:
+        return headers.get("x-api-key") == api_key
+    return client_host in _LOCAL_HOSTS
+
+
+class _AgentApiGuard:
+    """ASGI middleware: ADK routes need the API key (or a local client)."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] not in ("http", "websocket"):
+            return await self.app(scope, receive, send)
+        path = scope.get("path", "")
+        if path in _PUBLIC_PATHS or path.startswith(_PUBLIC_PREFIXES):
+            return await self.app(scope, receive, send)
+        headers = {
+            k.decode("latin-1").lower(): v.decode("latin-1")
+            for k, v in scope["headers"]
+        }
+        client = scope.get("client")
+        if _is_authorized(headers, client[0] if client else None):
+            return await self.app(scope, receive, send)
+        if scope["type"] == "websocket":
+            await receive()
+            await send({"type": "websocket.close", "code": 1008})
+            return
+        response = JSONResponse(
+            {"status": "error", "message": "Unauthorized."}, status_code=403
+        )
+        await response(scope, receive, send)
+
+
+def _build_app() -> FastAPI:
+    if not _agent_api_enabled():
+        plain = FastAPI()
+
+        @plain.get("/health")
+        def health() -> dict[str, str]:
+            return {"status": "ok"}
+
+        return plain
+
+    from google.adk.cli.fast_api import get_fast_api_app
+
+    adk_app = get_fast_api_app(
+        agents_dir=AGENT_DIR,
+        web=False,
+        artifact_service_uri=artifact_service_uri,
+        allow_origins=allow_origins,
+        session_service_uri=session_service_uri,
+        otel_to_cloud=False,
+    )
+    adk_app.add_middleware(_AgentApiGuard)
+    return adk_app
+
+
+app: FastAPI = _build_app()
 app.title = "bondy"
 app.description = "API for interacting with the Agent bondy"
 
@@ -97,8 +168,6 @@ def collect_feedback(feedback: Feedback) -> dict[str, str]:
                 feedback.model_dump(), severity="INFO"
             )
         except Exception as e:
-            import logging
-
             logging.getLogger(__name__).info(
                 f"Feedback received (GCP logging failed: {e}): {feedback.model_dump()}"
             )
@@ -193,8 +262,6 @@ async def run_audit(req: AuditRequest):
     return payload
 
 
-from collections import defaultdict
-
 file_locks = defaultdict(asyncio.Lock)
 
 
@@ -204,15 +271,10 @@ async def apply_fix(req: ApplyFixRequest, request: Request):
 
     # This endpoint writes to disk: require an API key if configured,
     # otherwise only accept requests coming from the local machine.
-    api_key = os.getenv("BONDY_API_KEY")
-    if api_key:
-        authorized = request.headers.get("x-api-key") == api_key
-    else:
-        authorized = request.client is not None and request.client.host in (
-            "127.0.0.1",
-            "::1",
-            "localhost",
-        )
+    authorized = _is_authorized(
+        {k.lower(): v for k, v in request.headers.items()},
+        request.client.host if request.client else None,
+    )
     if not authorized:
         return JSONResponse(
             {"status": "error", "message": "Unauthorized."}, status_code=403

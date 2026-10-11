@@ -23,6 +23,7 @@ SKILLS = ROOT / "bondy/resources/skills"
 def _load(skill: str, script: str):
     path = SKILLS / skill / "scripts" / script
     spec = importlib.util.spec_from_file_location(f"guard_{path.stem}", path)
+    assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)

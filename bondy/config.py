@@ -3,7 +3,10 @@
 Precedence (highest first): **flag > environment variable > bondy.toml > default**.
 
 This module only depends on the standard library so it can be used by the core
-package (CLI, doctor) without FastAPI or ADK. It never modifies ``os.environ``.
+package (CLI, doctor) without FastAPI or ADK. It is the single place that reads
+Bondy's environment variables (``tests/unit/test_settings_only.py`` enforces it).
+``load_settings`` / ``load_server_settings`` never modify ``os.environ``; the only
+writer is ``export_dotenv_to_environ``, which the web server calls explicitly.
 
 The API key is deliberately *not* readable from ``bondy.toml``: that file is
 meant to be committed to the repository. It comes from ``GEMINI_API_KEY`` or
@@ -17,8 +20,8 @@ from __future__ import annotations
 import os
 import re
 import tomllib
-from collections.abc import Mapping
-from dataclasses import dataclass, field
+from collections.abc import Mapping, MutableMapping
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -361,11 +364,16 @@ def read_dotenv_key(
     return None
 
 
-def _key_from_dotenv(path: Path) -> tuple[str, str] | None:
+def _read_dotenv(path: Path) -> dict[str, str]:
+    """All ``NAME=value`` pairs of a ``.env`` file (nothing is exported).
+
+    Never raises: an unreadable file is treated as empty. Quotes and inline
+    comments are handled; there is no interpolation and no multi-line values.
+    """
     try:
         text = path.read_text(encoding="utf-8-sig", errors="replace")
     except OSError:
-        return None
+        return {}
     values: dict[str, str] = {}
     for line in text.splitlines():
         line = line.strip()
@@ -373,12 +381,45 @@ def _key_from_dotenv(path: Path) -> tuple[str, str] | None:
             continue
         name, _, raw = line.partition("=")
         name = name.strip().removeprefix("export ").strip()
-        if name in API_KEY_ENV_VARS:
+        if name:
             values[name] = _parse_dotenv_value(raw)
+    return values
+
+
+def _key_from_dotenv(path: Path) -> tuple[str, str] | None:
+    values = _read_dotenv(path)
     for name in API_KEY_ENV_VARS:  # same order as the environment
         if values.get(name):
             return values[name], name
     return None
+
+
+# Variables the web server may take from the project's ``.env`` (see
+# ``export_dotenv_to_environ``). Everything else in the file is ignored: a
+# stray PATH/HOME/etc. never reaches ``os.environ``.
+DOTENV_EXPORT_PREFIXES = ("BONDY_", "GOOGLE_", "GEMINI_", "GENAI_", "OTEL_")
+DOTENV_EXPORT_NAMES = ("ALLOW_ORIGINS", "LOGS_BUCKET_NAME", "COMMIT_SHA")
+
+
+def export_dotenv_to_environ(
+    path: Path | str, env: MutableMapping[str, str] | None = None
+) -> list[str]:
+    """Copies the allowlisted variables of a ``.env`` into the environment.
+
+    This is what the web server does at start-up (ADK, ``google-genai`` and the
+    telemetry hooks read their credentials/options from ``os.environ``).
+    Variables already set win (``override=False``). Only ``DOTENV_EXPORT_*``
+    names are copied, so the file is no longer loaded wholesale. Returns the
+    names that were exported.
+    """
+    env = os.environ if env is None else env
+    exported: list[str] = []
+    for name, value in _read_dotenv(Path(path)).items():
+        allowed = name in DOTENV_EXPORT_NAMES or name.startswith(DOTENV_EXPORT_PREFIXES)
+        if allowed and name not in env:
+            env[name] = value
+            exported.append(name)
+    return exported
 
 
 def resolve_api_key(env: Mapping[str, str] | None = None) -> str | None:
@@ -391,11 +432,76 @@ def resolve_api_key(env: Mapping[str, str] | None = None) -> str | None:
     return None
 
 
+def use_vertexai(env: Mapping[str, str] | None = None) -> bool:
+    """``GOOGLE_GENAI_USE_VERTEXAI`` is truthy (Vertex AI instead of an API key).
+
+    It is read by the google-genai/ADK SDKs themselves; Bondy only needs to know
+    it to avoid forcing an AI Studio key on top of it.
+    """
+    env = os.environ if env is None else env
+    return env.get("GOOGLE_GENAI_USE_VERTEXAI", "").strip().lower() in {"1", "true"}
+
+
+# Server (web UI / ADK) settings. They are not scan settings, so they are not in
+# bondy.toml: they come from the environment (and the server's ``.env``).
+APPLY_TOKEN_ENV = "BONDY_APPLY_TOKEN"
+LEGACY_APPLY_TOKEN_ENV = "BONDY_API_KEY"  # deprecated alias; NOT the Gemini key
+
+
+@dataclass(frozen=True)
+class ServerSettings:
+    """Settings of ``bondy.fast_api_app`` resolved from the environment."""
+
+    # Token required in ``X-API-Key`` by /api/apply-fix and (when enabled) the
+    # agent API. ``None`` -> only local clients. Unrelated to the Gemini key.
+    apply_token: str | None = field(default=None, repr=False)
+    enable_agent_api: bool = False  # BONDY_ENABLE_AGENT_API (P0-3 opt-in)
+    allow_origins: list[str] | None = None  # ALLOW_ORIGINS (comma-separated)
+    cloud_logging: bool = False  # BONDY_CLOUD_LOGGING
+    logs_bucket: str | None = None  # LOGS_BUCKET_NAME
+    deprecations: tuple[str, ...] = ()  # messages the server logs at start-up
+
+
+def _env_flag(value: str) -> bool:
+    """Opt-in flags: ``1``/``true``/``yes``/``on`` enable; anything else is off."""
+    return value.strip().lower() in _TRUE
+
+
+def load_server_settings(env: Mapping[str, str] | None = None) -> ServerSettings:
+    """Resolves the web server settings from ``env`` (default ``os.environ``).
+
+    ``BONDY_APPLY_TOKEN`` is the token; ``BONDY_API_KEY`` still works as a
+    deprecated alias (the new name wins when both are set).
+    """
+    env = os.environ if env is None else env
+    token = env.get(APPLY_TOKEN_ENV, "") or None
+    legacy = env.get(LEGACY_APPLY_TOKEN_ENV, "") or None
+    deprecations: list[str] = []
+    if legacy:
+        deprecations.append(
+            f"{LEGACY_APPLY_TOKEN_ENV} is deprecated; use {APPLY_TOKEN_ENV} "
+            "(same value, same X-API-Key header). It protects /api/apply-fix and "
+            "the agent API and is unrelated to the Gemini API key."
+            + (f" {APPLY_TOKEN_ENV} takes precedence." if token else "")
+        )
+        token = token or legacy
+    origins = [o.strip() for o in env.get("ALLOW_ORIGINS", "").split(",")]
+    return ServerSettings(
+        apply_token=token,
+        enable_agent_api=_env_flag(env.get("BONDY_ENABLE_AGENT_API", "")),
+        allow_origins=[o for o in origins if o] or None,
+        cloud_logging=_env_flag(env.get("BONDY_CLOUD_LOGGING", "")),
+        logs_bucket=env.get("LOGS_BUCKET_NAME", "").strip() or None,
+        deprecations=tuple(deprecations),
+    )
+
+
 def load_settings(
     flags: Mapping[str, Any] | None = None,
     env: Mapping[str, str] | None = None,
     config_path: Path | str | None = None,
     start_dir: Path | str | None = None,
+    use_file: bool = True,
 ) -> Settings:
     """Resolves settings with precedence flag > env > file > default.
 
@@ -406,12 +512,15 @@ def load_settings(
         config_path: Explicit ``bondy.toml`` (error if missing). When omitted the
             nearest one above ``start_dir`` / cwd is used, if any.
         start_dir: Where to start looking for ``bondy.toml``.
+        use_file: ``False`` ignores ``bondy.toml`` (used by the lenient loader).
     """
     flags = dict(flags or {})
     env = os.environ if env is None else env
 
     path: Path | None
-    if config_path is not None:
+    if not use_file:
+        path = None
+    elif config_path is not None:
         path = Path(config_path)
         if not path.is_file():
             raise ConfigError(f"Config file not found: {path}.")
@@ -460,3 +569,24 @@ def load_settings(
             values["baseline"] = str(path.resolve().parent / candidate)
 
     return Settings(api_key=api_key, sources=sources, config_path=path, **values)
+
+
+def load_settings_lenient(
+    env: Mapping[str, str] | None = None, start_dir: Path | str | None = None
+) -> Settings:
+    """``load_settings`` that never raises, for agent-mode tool code.
+
+    Falls back to the environment without ``bondy.toml`` and then to defaults
+    (keeping the API key), so a broken config cannot crash a tool call halfway
+    through an audit. The CLI/pipeline use the strict ``load_settings``.
+    """
+    env = os.environ if env is None else env
+    try:
+        return load_settings(env=env, start_dir=start_dir)
+    except ConfigError:
+        pass
+    try:
+        return load_settings(env=env, start_dir=start_dir, use_file=False)
+    except ConfigError:
+        pass
+    return replace(load_settings(env={}, use_file=False), api_key=resolve_api_key(env))

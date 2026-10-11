@@ -23,15 +23,15 @@ o de ruptura de contrato.
 
 | # | Pendiente | Estado real | Prioridad |
 |---|---|---|---|
-| 1 | Config leída fuera de `Settings` | **Vigente, y más amplio** (ver P1-1) | P1 |
+| 1 | Config leída fuera de `Settings` | **Hecho** (P1-1) | P1 |
 | 2 | `--mode agent` en la CLI | **Vigente**; decisión de producto antes de implementar (P2-1) | P2 |
 | 3 | `ty` sobre tests | **Vigente, cifra desactualizada**: 34 diagnósticos, no 9 (P1-3) | P1 |
 | 4 | `upload-sarif` en forks | **Vigente** (P0-2) | P0 |
-| 5 | Bucle JS bloquea `page.evaluate` | **Vigente**, sin watchdog (P1-2) | P1 |
+| 5 | Bucle JS bloquea `page.evaluate` | **Hecho** (P1-2) | P1 |
 | 6 | `app.js` con mapeo propio | **Parcialmente resuelto**: el mapeo checks->WCAG ya no está; queda un fallback heurístico muerto (P2-3) | P2 |
 | 7 | E7 plantillas / B8 Batch API | **Vigente**, es trabajo de producto (P2-5) | P2 |
 | 8 | `render_page.py` conserva hosts públicos | **Obsoleto en `render_page`** (ya no los permite), pero el riesgo real está en otros tres sitios (P0-1) | P0 |
-| 9 | `INSTALL_CHROMIUM=true` sin probar | **Vigente** (P1-4) | P1 |
+| 9 | `INSTALL_CHROMIUM=true` sin probar | **Hecho** (P1-4; probado en local, falta ejecutar el job en GitHub) | P1 |
 
 ---
 
@@ -84,7 +84,7 @@ debe listar un solo uso.
 
 **Dependencias**: ninguna. Conviene hacerlo antes que P1-1 (comparten `vision_tools.py`).
 
-### P0-2. `upload-sarif` falla en PRs desde forks (pendiente 4)
+### P0-2. `upload-sarif` falla en PRs desde forks (pendiente 4) — HECHO
 
 **Estado verificado**: `action.yml:129-134`. La condición es
 `always() && inputs.upload-sarif == 'true' && inputs.format == 'sarif' && hashFiles(...) != ''`.
@@ -112,6 +112,15 @@ sobre la condición); validar el YAML con el test existente; la ejecución real 
 PR de fork (no verificable en local, dejarlo anotado igual que el resto de CI).
 
 **Dependencias**: ninguna. Se puede agrupar con P1-4 y P1-3 (todo CI/infra).
+
+**Resultado (hecho)**: `action.yml` omite la subida cuando `github.event_name == 'pull_request'` y el
+repo de la cabecera no es el del workflow, o el actor es `dependabot[bot]`; en ese caso emite
+`::notice::` y sube el SARIF con `actions/upload-artifact@cf430e0... # v7.0.2` (SHA verificado con
+`git ls-remote`) como `bondy-sarif`. El paso `upload-sarif` lleva `continue-on-error: true`.
+`docs/ci-example.yml` documenta permisos y el requisito de Code Scanning en repos privados;
+**la sección equivalente del README queda pendiente** (README tiene cambios sin commitear, no tocado) para el
+commit `docs:`. Tests: `test_action_skips_sarif_upload_for_read_only_tokens`. **Sin verificar**:
+ejecucion real en un PR de fork (solo local: YAML valido + test estructural).
 
 ### P0-3. La app web monta la API completa de ADK y escucha en 0.0.0.0 (hallazgo nuevo)
 
@@ -144,11 +153,38 @@ hay `/run`; `uv run pytest tests/unit -q`; `BONDY_NO_LLM=1 uvicorn ...` y `GET /
 **Dependencias**: coordinar con P1-1 (config) y P2-1 (`--mode agent`); decidir primero
 si el agente ADK sigue siendo una superficie soportada.
 
+**Estado (2026-10-11, hecho)**
+
+- **Riesgo CONFIRMADO** (TestClient sobre `bondy.fast_api_app:app`, `BONDY_NO_LLM=1`, sin
+  `BONDY_API_KEY`, cliente simulado `203.0.113.9`): `GET /list-apps` 200 (lista `bondy`,
+  `dist`, `docs`, `examples`, `mcp_server`, `tests`), `GET /docs` 200, `GET /openapi.json`
+  200, `GET/POST /apps/bondy/users/u/sessions` 200 (crea y lista sesiones), `POST /run` y
+  `POST /run_sse` 422 (la ruta existe y se alcanza; solo falla la validación del cuerpo,
+  sin 401/403). Mismo resultado desde `testclient` (local) y desde la IP remota. `/run_live`
+  (websocket) también registrado. Con la clave real una llamada válida a `/run` invocaría
+  al agente con la key de Gemini (no se probó para no gastar cuota).
+- **Corrección**: `_build_app()` devuelve un `FastAPI()` propio (con `/health`) salvo
+  `BONDY_ENABLE_AGENT_API=1`; con la bandera monta ADK y añade `_AgentApiGuard` (ASGI,
+  HTTP y websocket): fuera de `/`, `/static/`, `/api/*`, `/feedback` y `/health` exige
+  `X-API-Key` si hay `BONDY_API_KEY`, o cliente local si no. `/api/apply-fix` reutiliza
+  `_is_authorized`. Verificado tras el cambio: `/list-apps` 404 y `/` , `/health`,
+  `/api/checks` 200 con uvicorn real en 127.0.0.1.
+- **Tests**: `tests/unit/test_agent_api_guard.py` (23). `pytest tests/unit`: 543 pasan,
+  1 omitido; `ruff check`, `ruff format --check`, `ty check bondy tests` limpios.
+- **Pendiente / no cambiado**: (1) `Dockerfile` sigue con `--host 0.0.0.0` (necesario en
+  contenedor; ya no expone ADK por defecto, pero `/api/audit` y `/feedback` siguen sin
+  autenticación y `/api/audit` puede gastar cuota de Gemini: decisión de diseño previa);
+  (2) README no actualizado (documentar `BONDY_ENABLE_AGENT_API`; no tocado por
+  instrucción); (3) el import de ADK sigue siendo necesario solo con la bandera, así que
+  P2-2 (`server` sin `agent`) queda desbloqueado, no hecho; (4) `agents_dir=AGENT_DIR`
+  expone toda la raíz del repo como "apps" en `/list-apps` cuando la bandera está activa;
+  (5) detrás de un proxy inverso `request.client.host` es el del proxy (regla heredada).
+
 ---
 
 ## 3. Prioridad P1
 
-### P1-1. Configuración fuera de `bondy/config.py` (pendiente 1)
+### P1-1. Configuración fuera de `bondy/config.py` (pendiente 1) — HECHO
 
 **Estado verificado**
 
@@ -191,7 +227,45 @@ test nuevo "BONDY_VISION_MODEL cambia el modelo de `_generate`" con
 
 **Dependencias**: tras P0-1 (mismo archivo); condiciona P2-1 y P2-2.
 
-### P1-2. Sin watchdog duro por página (pendiente 5)
+**Estado (2026-10-11, hecho)**
+
+- `bondy/config.py`: nuevos `ServerSettings` + `load_server_settings()` (token, `enable_agent_api`,
+  `allow_origins`, `cloud_logging`, `logs_bucket`, `deprecations`), `use_vertexai()`,
+  `load_settings_lenient()` (nunca lanza; para herramientas del agente), `use_file=` en
+  `load_settings` y `export_dotenv_to_environ()` (único escritor del entorno, lista blanca
+  de prefijos `BONDY_/GEMINI_/GOOGLE_/GENAI_/OTEL_` + `ALLOW_ORIGINS`, `LOGS_BUCKET_NAME`,
+  `COMMIT_SHA`; sin pisar variables existentes). `_read_dotenv` generaliza el parser que ya
+  usaba la CLI (sin cambio de comportamiento para la API key).
+- `vision_tools.py`: `_models()` por llamada; sin `VISION_MODEL`/`FALLBACK_MODEL` ni alias
+  `_quota_retry_delay`. `agent.py`: `model=load_settings_lenient().model`.
+  `fast_api_app.py`: sin `load_dotenv` ni lecturas de `os.environ`; sin `noqa: E402`.
+  `web_audit.py`: ya no usa `os.environ` (pasa `env` tal cual a `load_settings`).
+- Token: `BONDY_APPLY_TOKEN` (nuevo) con `BONDY_API_KEY` como alias heredado y aviso en el log;
+  el encabezado `X-API-Key` no cambia. `/api/audit` y `/feedback` siguen sin autenticación
+  (decisión: Bondy es local) y `BONDY_ENABLE_AGENT_API` se mantiene como opt-in.
+- Test de arquitectura (AST, no regex) en `tests/unit/test_settings_only.py` (21 tests): fuera
+  de `config.py`, `doctor.py` y `app_utils/telemetry.py` no hay `os.getenv`/`os.environ`, y los
+  nombres `BONDY_MODEL/VISION_MODEL/FALLBACK_MODEL/API_KEY/APPLY_TOKEN/ENABLE_AGENT_API/
+  CLOUD_LOGGING` solo aparecen en `config.py`. Más: precedencia env > toml > default de los
+  modelos de `_generate`, `agent.py` respeta `BONDY_MODEL` (subproceso, sin Gemini),
+  `bondy.toml` roto no tumba las herramientas, alias del token, lista blanca del `.env`.
+- Verificado: `pytest tests/unit` 564 pasan / 1 omitido (base 543/1); `tests/integration/
+  test_server_e2e.py` 3 pasan; `ruff check`, `ruff format --check`, `ty check bondy tests` limpios.
+- **Para el commit de docs (no tocado: README.md / .env.example / docs/architecture.md tienen
+  cambios sin commitear)**: README líneas ~163 (el servidor ya no "carga el `.env` en su entorno":
+  solo las variables permitidas), ~193 y ~149/~304/~347 (documentar `BONDY_APPLY_TOKEN`, marcar
+  `BONDY_API_KEY` como deprecado, añadir `BONDY_ENABLE_AGENT_API`), tabla de extras línea ~115
+  (`python-dotenv` ya no se usa); `.env.example:26` (`BONDY_APPLY_TOKEN`); `docs/architecture.md`
+  (el agente ADK toma el modelo de `Settings.model`).
+- **Pendiente / no hecho**: (1) `python-dotenv` sigue en el extra `server` de `pyproject.toml`
+  (ya sin uso; quitarlo requiere regenerar `uv.lock`); (2) `telemetry.py` conserva sus lecturas
+  de `LOGS_BUCKET_NAME`/`OTEL_*` (escribe valores por defecto para SDK de terceros; en la lista
+  blanca del test); (3) `agent.py` mantiene `# ruff: noqa` de archivo y `file_locks`/extracción de
+  `apply_fix` (resto de P2-4) sin tocar; (4) el parser de `.env` no interpola ni admite
+  valores multilínea (python-dotenv sí); (5) `GOOGLE_GENAI_USE_VERTEXAI` y las `GOOGLE_*` siguen
+  siendo del SDK, no de `Settings`: solo se consultan con `use_vertexai()`.
+
+### P1-2. Sin watchdog duro por página (pendiente 5) — HECHO
 
 **Estado verificado**: el mecanismo de timeouts es cooperativo.
 `bondy/scan.py::scan_loaded` solo comprueba `deadline` **entre** páginas
@@ -234,7 +308,51 @@ la página queda marcada y que la página siguiente sí se escanea. Comprobar qu
 
 **Dependencias**: ninguna; **no** agrupar con otros cambios de `scan.py` (P2-4).
 
-### P1-3. `ty check bondy tests` (pendiente 3)
+**Hecho (opción A, con una variante)**:
+
+- `bondy/app_utils/browser.py`: `page_watchdog(seconds)` arma un `threading.Timer` por página
+  dentro de `browser_session`; al vencer mata el árbol de procesos del **driver** de
+  Playwright (`taskkill /F /T` en Windows; `pkill -P` + `SIGKILL` en POSIX; sin `psutil`).
+  Se mata el driver y no solo Chromium porque Playwright no expone el PID del navegador y
+  el PID del driver sí se alcanza (`_impl_obj._connection._transport._proc.pid`, atributo
+  privado leído con `getattr` defensivo: si desaparece, el watchdog queda inactivo y todo
+  sigue como antes). `BrowserSession.browser()` detecta `_driver_dead`, hace `pw.stop()` y
+  arranca driver y navegador nuevos. `is_connected()` NO sirve tras matar el driver
+  (seguía devolviendo True): por eso hay un indicador propio.
+- `bondy/scan.py::scan_loaded`: presupuesto = `session.page_timeout` (**no** `timeout * 2`:
+  `--timeout` ya está documentado como "segundos por página"), acotado por
+  `deadline - now`, así `--scan-timeout` también deja de ser solo cooperativo. Antes de
+  armar el temporizador se llama a `session.prepare()` para que lanzar (o relanzar) el
+  navegador no consuma el tiempo de la página. Con `--timeout 0` o fuera de sesión no hay
+  watchdog.
+- Decisión del resultado: la página queda en `skipped` (no en `errors`):
+  `PAGE_TIMEOUT_SKIP (N s)`, o `SCAN_TIMEOUT_SKIP` si el límite fue el global. Es un
+  resultado **parcial** (exit 3 salvo que haya hallazgos de otras páginas, que mandan: exit
+  1), consistente con `--scan-timeout`; se escribe `resume.json` con `pages_pending` y la
+  página no entra en `pages.json`. Sus hallazgos parciales se descartan. Los escáneres de
+  navegador restantes de esa página no se ejecutan (`PageHungError`), los estáticos sí
+  corren pero su salida se descarta junto con la página.
+- Tests: `tests/unit/test_page_watchdog.py` (7). Con Chromium real: `for(;;);` 50 ms
+  después de `load`, `timeout=4`; la página colgada tarda 4.2-4.3 s, las otras dos se
+  escanean (axe_stats presentes), `resume.json` con `pages_pending == 1`, `pages.json` con
+  a y c pero no b. Sin navegador: skip + resto escaneado, escáneres restantes omitidos,
+  tope por `--scan-timeout`, sin watchdog sin sesión o con 0, temporizador desarmado,
+  relanzado del navegador.
+- **Límites conocidos / no verificado**: (1) solo probado en Windows; la rama POSIX
+  (`pkill -P` + `SIGKILL`) no se ha ejecutado en macOS/Linux (CI lo cubrirá con el test
+  de Chromium real; si es frágil, opción B). (2) Cada kill deja el directorio
+  `playwright_chromiumdev_profile-*` en el temporal del SO (Chromium no pudo limpiarlo; no
+  hay forma segura de identificarlo sin `psutil`). (3) El watchdog solo actúa dentro de
+  `browser_session` (CLI, `run_scan`, web); las llamadas sueltas a un escáner como librería
+  conservan su comportamiento. (4) Una página colgada seguirá colgando en cada `--resume`
+  hasta excluirla (`--exclude`) o arreglarla.
+- **Para el commit de docs (no tocado)**: README, sección de `--timeout`/`--scan-timeout`
+  (el primero es ahora un límite duro por página que mata el navegador y deja la página
+  pendiente/exit 3) y tabla de códigos de salida; `docs/architecture.md` (watchdog en
+  `browser.py`/`scan.py`); el texto de ayuda de `--timeout` en `bondy/cli.py` conviene
+  ampliarlo igual.
+
+### P1-3. `ty check bondy tests` (pendiente 3) — HECHO
 
 **Estado verificado** (ejecutado hoy): 34 diagnósticos, no 9.
 
@@ -262,7 +380,15 @@ sigue en 492 passed.
 
 **Dependencias**: ninguna; agrupable con P0-2 y P1-4 en una rama "ci-hardening".
 
-### P1-4. `INSTALL_CHROMIUM=true` sin probar (pendiente 9)
+**Resultado (hecho)**: 0 diagnosticos (partia de 35). Desviacion del plan: en vez de un alias
+nuevo se tipó `scanners=` como `Mapping[str, Scanner]` en `pipeline.py` y `scan.py` (la causa real
+era la invarianza de `dict`; `Mapping` es covariante en el valor, sin cambio de comportamiento ni de
+contrato). Los `None` se estrecharon con `assert`/filtros y la carga de scripts comprueba `spec`/
+`loader`; sin `ignore`s. Se corrigio ademas `log_message` de `test_netguard.py` (diagnostico nuevo
+de P0-1). `uv run ty check bondy tests` se ejecuta ahora en `ci.yml`. Tests:
+`uv run pytest tests/unit` 520 passed, 1 skipped.
+
+### P1-4. `INSTALL_CHROMIUM=true` sin probar (pendiente 9) — HECHO
 
 **Estado verificado**: `Dockerfile:42-46` ejecuta `playwright install --with-deps chromium`
 tras `uv sync`. Nunca se construyó (daemon apagado). Riesgos leídos del archivo:
@@ -289,6 +415,42 @@ tras `uv sync`. Nunca se construyó (daemon apagado). Riesgos leídos del archiv
 **Verificación**: los comandos anteriores; tamaño de imagen; tiempo de `doctor`.
 
 **Dependencias**: tras P0-3 (la imagen es la que expone el puerto).
+
+**Resultado (2026-10-11, hecho)**: construido y probado con Docker Desktop 28.3.3 (daemon local).
+
+| Comando | Resultado |
+|---|---|
+| `docker build --build-arg INSTALL_CHROMIUM=true -t bondy-p14-test:chromium .` (con `uv==0.8.13`) | OK, 3 min 10 s; imagen 2.48 GB |
+| `docker run --rm bondy-p14-test:chromium bondy doctor` | exit 0, 5.8 s: `[OK] browser: Scans will use: Playwright Chromium` (playwright 1.60.0, axe-core 4.10.2); solo `[WARN] api-key` (esperado, sin key) |
+| `docker run --rm bondy-p14-test:chromium bondy scan examples --no-llm` | exit 1 (hay hallazgos), 9 s: 4 archivos, 36 hallazgos, sin nota `STATIC MODE`; axe, `focus-order`, `focus-trap` y contraste ejecutados |
+| `docker run -d -p 18080:8080 ...` + `POST /api/audit` (`examples/site_3_mixed_errors/index.html`, `enabled_checks` WCAG 1.4.3/3.1.1) | `/health` ok; `status: success`, `mode: no-llm`, 3 hallazgos, `notes` sin `STATIC MODE` (sin key de Gemini en el contenedor: 0 llamadas) |
+| Alinear `uv`: `ARG UV_VERSION=0.11.21` en `Dockerfile` y rebuild con Chromium | OK (2 min 10 s); `uv --version` -> `uv 0.11.21`; doctor y scan idénticos |
+| `docker build -t bondy-p14-test:static .` (sin build-arg) | OK; imagen 1.02 GB; `doctor` -> `[WARN] browser: ... STATIC mode`; `bondy scan examples --no-llm` y `--static --no-llm`: 16 hallazgos (solo checks HTML) y nota `STATIC MODE` como antes |
+
+Cambios: `Dockerfile` (`ARG UV_VERSION=0.11.21`, mismo valor que `ci.yml`; nueva fuente única por ARG, el
+valor de `ci.yml` sigue siendo literal y hay que mantener ambos a mano) y `.github/workflows/ci.yml`
+(trigger `workflow_dispatch` y job `docker`: build con Chromium, `bondy doctor` y
+`bondy scan examples --no-llm`; exige "Playwright Chromium" en doctor, exit 1 en el scan y ausencia de
+`STATIC MODE`; corre en push a main y a demanda, no en PRs). Los pasos `run` del job se simularon
+localmente con `bash -e` contra la imagen (positivo OK; contra la imagen sin Chromium falla, como debe).
+YAML validado con `yaml.safe_load`.
+
+**Hallazgos / no resuelto**
+
+- **Usuario no root: no soportado todavía.** La imagen corre como `root` y Playwright instala en
+  `/root/.cache/ms-playwright`. `docker run --user 1000:1000 ... bondy doctor` da `[WARN] browser: No
+  usable browser` (STATIC) y `[FAIL] write-access: Cannot write to /code`. Si se quiere `USER` no root:
+  fijar `PLAYWRIGHT_BROWSERS_PATH=/ms-playwright` antes de `playwright install`, `chown` de `/code` y
+  HOME escribible. No se hizo (cambia el modelo de permisos de Cloud Run y de `/api/apply-fix`).
+- Chromium como root arranca sin problemas en el contenedor (el lanzador de `browser.py` funciona);
+  no se investigó el flag `--no-sandbox` porque no hizo falta.
+- Sin `HEALTHCHECK` (la imagen slim no trae `curl`; haría falta `python -c urllib`). `bondy doctor` ya
+  valida la imagen en CI. Pendiente opcional.
+- Falta un test que compare las versiones de `uv` de `Dockerfile` y `ci.yml` (`tests/unit/test_ci_files.py`
+  tenía cambios de otro agente; no se tocó).
+- Sin verificar: ejecución real del job `docker` en GitHub Actions (solo local). Anotar en
+  `docs/improvement-plan.md` ("Sin verificar" -> verificado) queda para el commit `docs:`
+  (no se editó ese archivo en esta pasada).
 
 ### P1-5. Contrato público desalineado con la realidad (hallazgo nuevo, documental)
 
@@ -376,7 +538,8 @@ real"; dejar la comprobación manual con `BONDY_NO_LLM=1`). **Dependencias**: ni
   abierta): reordenar imports y quitar el `noqa` de archivo.
 - `vision_tools._quota_retry_delay = quota_retry_delay  # legacy name`
   (`vision_tools.py:36`): solo lo usan 2 tests; migrarlos a `alt_rules.quota_retry_delay`
-  y eliminar el alias.
+  y eliminar el alias. **HECHO con P1-1** (también los imports de `fast_api_app.py` y su
+  `noqa: E402`; queda `agent.py`).
 
 **Riesgo**: bajo. **Esfuerzo**: S-M. **Verificación**: `ruff check`, `ruff format --check`,
 `uv run pytest tests/unit -q`. **Dependencias**: tras P0-3 y P1-1 (mismo archivo).
@@ -430,10 +593,10 @@ retira o se corrige (`token` solo por `GITHUB_TOKEN`).
 | Orden | Rama / commit | Ítems | Esfuerzo | Notas |
 |---|---|---|---|---|
 | 1 | `fix/ssrf-image-fetch` | P0-1 + P1-5 | M | Seguridad primero; un commit por ítem |
-| 2 | `ci/hardening` | P0-2 + P1-3 (+ job de P1-4) | S-M | Solo YAML, alias de tipo y tests |
+| 2 | `ci/hardening` | P0-2 + P1-3 — HECHO (job de P1-4 pendiente, ver P1-4) | S-M | Solo YAML, tipos y tests |
 | 3 | `fix/server-attack-surface` | P0-3 | M | Decide el destino del agente ADK |
-| 4 | `refactor/settings-only` | P1-1 (y P2-4: alias legacy, imports) | M | Tras 1 y 3 (mismos archivos) |
-| 5 | `fix/page-watchdog` | P1-2 | M-L | Rama propia, sin mezclar con otros refactores |
+| 4 | `refactor/settings-only` | P1-1 (y P2-4: alias legacy, imports) — HECHO | M | Tras 1 y 3 (mismos archivos) |
+| 5 | `fix/page-watchdog` | P1-2 — HECHO | M-L | Rama propia, sin mezclar con otros refactores |
 | 6 | `chore/docker-verify` | P1-4 | S | Requiere Docker Desktop encendido |
 | 7 | `refactor/web-cleanup` | P2-3 + P2-4 (resto) | S | |
 | 8 | `refactor/core-structure` | P2-2 (un archivo por commit) | L | Después del watchdog |

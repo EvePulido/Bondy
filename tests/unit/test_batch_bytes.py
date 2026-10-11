@@ -19,7 +19,9 @@ def test_batches_split_by_total_bytes_even_under_batch_size():
     groups = [_group(7 * mb) for _ in range(5)]
     batches = make_batches(groups, batch_size=8)
     assert [len(b) for b in batches] == [2, 2, 1]  # 14 MB, 14 MB, 7 MB
-    assert all(sum(len(g.image.data) for g in b) <= MAX_BATCH_BYTES for b in batches)
+    for b in batches:
+        total = sum(len(g.image.data) for g in b if g.image is not None)
+        assert total <= MAX_BATCH_BYTES
 
 
 def test_an_oversized_single_image_still_gets_its_own_batch():

@@ -9,6 +9,7 @@ on:
     branches: [ main ]
   pull_request:
     branches: [ main ]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -69,7 +70,40 @@ jobs:
         run: uv run ruff format --check .
 
       - name: Type check (ty)
-        run: uv run ty check bondy
+        run: uv run ty check bondy tests
 
       - name: Unit tests
         run: uv run pytest tests/unit -q
+
+  # Builds the image WITH Chromium and checks that the browser really works
+  # inside it. Not run on pull requests (about 3 minutes and ~2.5 GB image):
+  # it runs on pushes to main and on demand (workflow_dispatch).
+  docker:
+    name: docker image (with Chromium)
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Build image with Chromium
+        run: docker build --build-arg INSTALL_CHROMIUM=true -t bondy:ci .
+
+      # `bondy doctor` must report the Playwright Chromium and exit 0.
+      - name: bondy doctor
+        run: |
+          docker run --rm bondy:ci bondy doctor | tee doctor.txt
+          grep -q "Scans will use: Playwright Chromium" doctor.txt
+
+      # Deterministic scan (no Gemini, no API key) of the bundled examples.
+      # They have findings, so exit code 1 is the expected result; anything
+      # else, or a STATIC MODE note, means the browser did not work.
+      - name: bondy scan --no-llm examples
+        run: |
+          set +e
+          docker run --rm bondy:ci bondy scan examples --no-llm | tee scan.txt
+          code=${PIPESTATUS[0]}
+          set -e
+          test "$code" -eq 1
+          if grep -q "STATIC MODE" scan.txt; then exit 1; fi

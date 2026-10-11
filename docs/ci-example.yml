@@ -13,6 +13,10 @@ on:
 permissions:
   contents: read
   security-events: write # required by upload-sarif
+  # Private repositories need code scanning (GitHub Advanced Security) enabled.
+  # Pull requests from forks and Dependabot get a read-only token: the action
+  # skips the SARIF upload there and keeps the report as the `bondy-sarif`
+  # artifact; the scan result still sets the exit code.
 
 jobs:
   bondy:
