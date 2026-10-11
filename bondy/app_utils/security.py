@@ -1,12 +1,5 @@
 import os
 
-# Statically allowed paths to prevent navigation to arbitrary URLs
-ALLOWED_SOURCES = {
-    "examples/site_1_bad_alt",
-    "examples/site_2_focus_trap",
-    "examples/site_3_mixed_errors",
-}
-
 
 def _is_within(path: str, root: str) -> bool:
     """True if ``path`` is ``root`` or inside it (separator-aware: '/a/Bondy-evil'
@@ -19,7 +12,7 @@ def validate_input_before_audit(source: str, raw_html: str | None = None) -> Non
     """
     Security Guardrail (Pillar 4): Validates the source input before allowing
     Playwright to load any web page.
-    Only allows pre-registered local demo sites in ALLOWED_SOURCES or raw HTML input.
+    Only allows paths inside the 'examples' folder or raw HTML input.
     """
     if raw_html is not None:
         return  # Raw HTML pasted directly: allowed

@@ -1,4 +1,0 @@
-dataset: eval_dataset.jsonl
-agent: bondy.agent:root_agent
-metrics:
-  - exact_match

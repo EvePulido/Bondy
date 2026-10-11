@@ -28,7 +28,7 @@ o de ruptura de contrato.
 | 3 | `ty` sobre tests | **Vigente, cifra desactualizada**: 34 diagnósticos, no 9 (P1-3) | P1 |
 | 4 | `upload-sarif` en forks | **Vigente** (P0-2) | P0 |
 | 5 | Bucle JS bloquea `page.evaluate` | **Hecho** (P1-2) | P1 |
-| 6 | `app.js` con mapeo propio | **Parcialmente resuelto**: el mapeo checks->WCAG ya no está; queda un fallback heurístico muerto (P2-3) | P2 |
+| 6 | `app.js` con mapeo propio | **Hecho** (P2-3): mapeo fuera y fallback heurístico eliminado | P2 |
 | 7 | E7 plantillas / B8 Batch API | **Vigente**, es trabajo de producto (P2-5) | P2 |
 | 8 | `render_page.py` conserva hosts públicos | **Obsoleto en `render_page`** (ya no los permite), pero el riesgo real está en otros tres sitios (P0-1) | P0 |
 | 9 | `INSTALL_CHROMIUM=true` sin probar | **Hecho** (P1-4; probado en local, falta ejecutar el job en GitHub) | P1 |
@@ -257,8 +257,8 @@ test nuevo "BONDY_VISION_MODEL cambia el modelo de `_generate`" con
   `BONDY_API_KEY` como deprecado, añadir `BONDY_ENABLE_AGENT_API`), tabla de extras línea ~115
   (`python-dotenv` ya no se usa); `.env.example:26` (`BONDY_APPLY_TOKEN`); `docs/architecture.md`
   (el agente ADK toma el modelo de `Settings.model`).
-- **Pendiente / no hecho**: (1) `python-dotenv` sigue en el extra `server` de `pyproject.toml`
-  (ya sin uso; quitarlo requiere regenerar `uv.lock`); (2) `telemetry.py` conserva sus lecturas
+- **Pendiente / no hecho**: (1) ~~`python-dotenv` en el extra `server`~~ retirado en la limpieza
+  de código sin uso (P2-7; `uv.lock` regenerado); (2) `telemetry.py` conserva sus lecturas
   de `LOGS_BUCKET_NAME`/`OTEL_*` (escribe valores por defecto para SDK de terceros; en la lista
   blanca del test); (3) `agent.py` mantiene `# ruff: noqa` de archivo y `file_locks`/extracción de
   `apply_fix` (resto de P2-4) sin tocar; (4) el parser de `.env` no interpola ni admite
@@ -454,7 +454,7 @@ YAML validado con `yaml.safe_load`.
 
 ### P1-5. Contrato público desalineado con la realidad (hallazgo nuevo, documental)
 
-- `bondy/app_utils/security.py:4-8,15`: `ALLOWED_SOURCES` es una constante **muerta**
+- **HECHO**: `bondy/app_utils/security.py:4-8,15`: `ALLOWED_SOURCES` era una constante **muerta**
   (solo se cita en el docstring y en `.agents/AGENTS.md:9`); el código real permite
   cualquier ruta bajo `examples/`. Eliminar la constante y corregir ambos textos.
 - `security.py:34`: `resolved_path.startswith(base_dir)` sin separador (prefijo
@@ -472,7 +472,7 @@ Agrupar con P0-1 (misma zona).
 ### P2-1. `--mode agent` en la CLI (pendiente 2)
 
 **Estado verificado**: `rg "mode|agent" bondy/cli.py` no muestra ningún modo; el agente
-(`bondy/agent.py`) solo es alcanzable por la web (ADK) y por `eval_config.yaml`.
+(`bondy/agent.py`) solo es alcanzable por la web (ADK) y por `agents-cli eval` (`tests/eval/`).
 
 **Recomendación**: **no implementarlo ahora**. La ruta por código (`run_scan`) es la
 soportada, determinista y con topes/caché; un modo agente duplicaría el pipeline sin
@@ -512,7 +512,7 @@ formato). **Esfuerzo**: L en total; hacer un archivo por rama. **Verificación**
 antes/después (byte a byte, con `--no-llm`). **Dependencias**: tras P1-2 para `scan.py`;
 `run_scan` tras P1-1.
 
-### P2-3. `app.js`: fallback heurístico muerto (pendiente 6, resto)
+### P2-3. `app.js`: fallback heurístico muerto (pendiente 6, resto) — HECHO
 
 **Estado verificado**: el mapeo checks -> WCAG de la UI ya salió de `app.js`
 (`/api/checks`; `web_audit.py:72-74,102-104` siempre envía `wcag` y `title`). Lo que
@@ -521,11 +521,16 @@ adivinan WCAG por texto (`id.includes('img')`...). La primera rama (`fix.wcag &&
 siempre se cumple con el servidor actual, así que el resto es código muerto y una
 segunda fuente de verdad potencial.
 
-**Cambio propuesto**: reducir `classifyFinding` a la rama con datos del servidor y
-un valor por defecto "Best practice"; eliminar las ramas heurísticas.
-**Riesgo**: bajo. **Esfuerzo**: S. **Verificación**: `tests/unit/test_web_audit.py` +
-revisión en navegador real (pendiente de P1 del plan original: "UI en un navegador
-real"; dejar la comprobación manual con `BONDY_NO_LLM=1`). **Dependencias**: ninguna.
+**Hecho**: `classifyFinding` queda en 6 líneas (datos del servidor, con "Best practice" y
+`finding_id` solo como valores por defecto defensivos; se quitó también `agent`, que
+nada leía). Evidencia: `classifyFinding` solo se invoca en `app.js:327` con los elementos
+de `data.data` de `/api/audit`; esos salen de `web_audit.py` (`_item_entry`: `wcag` cae a
+`BEST_PRACTICE`, `title` a `item.rule`; las correcciones de imagen salen de
+`core/fixes.py::build_fix` con `wcag="1.1.1"` y título fijo, y la caché de reanudación
+reconstruye `ImageFix(**d)` con todos los campos). `tests/unit/test_web_audit.py` ahora
+afirma `wcag` y `title` no vacíos en el contrato y que `app.js` no conserva las ramas
+heurísticas. **Sin verificar**: revisión en un navegador real (solo `node --check` y
+arranque del servidor con `BONDY_NO_LLM=1`).
 
 ### P2-4. Deuda menor de la capa web y utilidades
 
@@ -582,9 +587,14 @@ de decidir qué se conserva.
 
 Abiertos según `docs/improvement-plan.md` ("Abierto en Fase F"): F2 (`# ruff: noqa`,
 cubierto en P2-4), F3 (golden de formatos), F4, F6, F7 y un test de instalación en venv
-limpio como paso de CI. `mcp_server/github_server.py` sigue sin uso por el pipeline
-(CHANGELOG:158 anota el `token` expuesto como argumento de herramienta): decidir si se
-retira o se corrige (`token` solo por `GITHUB_TOKEN`).
+limpio como paso de CI. `mcp_server/github_server.py` — **HECHO (limpieza de código sin uso)**: se
+eliminó junto con el extra `mcp` (sin referencias en código, tests, CI, Dockerfile,
+`action.yml`, hooks ni entry points; el wheel solo empaqueta `bondy`). También se
+eliminaron `eval_config.yaml`/`eval_dataset.jsonl` de la raíz (`agents-cli` lee
+`tests/eval/eval_config.yaml`; verificado en su código instalado 0.6.1), `ALLOWED_SOURCES`
+(P1-5), `python-dotenv` del extra `server` (P1-1) y `SYSTEM_CHANNELS`. **Conservados a
+propósito**: `agents-cli-manifest.yaml` (lo exige `agents-cli deploy/eval/lint`) y el extra
+`eval` (`agents-cli eval generate` ejecuta `uv sync --dev --extra eval`).
 
 ---
 

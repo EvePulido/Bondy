@@ -143,6 +143,7 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 - `action.yml`: con `bash -e` (shell por defecto de GitHub), `bondy ...; code=$?` abortaba el paso con exit 1 sin registrar `exit-code` ni dejar subir el SARIF; ahora `code=0; bondy ... || code=$?`.
 
 ### Removed
+- Limpieza de código sin uso (rama sugerida `chore/remove-dead-code`; evidencia en `docs/refactor-plan.md`, P2-3 y P2-7): `mcp_server/github_server.py` y el extra `mcp` (`mcp`, `PyGithub`; el lock pierde `mcp`, `PyGithub` y sus dependencias exclusivas, sin cambios de versión en el resto); `eval_config.yaml` y `eval_dataset.jsonl` de la raíz (`agents-cli eval` lee `tests/eval/`; los de la raíz no los leía nada; se conservan `agents-cli-manifest.yaml`, que `agents-cli` exige, y el extra `eval`, que `agents-cli eval` instala); la constante `ALLOWED_SOURCES` de `bondy/app_utils/security.py` (solo se citaba en docstrings; la regla real es "dentro de `examples/`") y sus menciones en `.agents/AGENTS.md`; `python-dotenv` del extra `server` (sigue instalado de forma transitiva por `google-adk`, pero Bondy ya no lo importa) y el test `test_dotenv_does_not_override_existing_env`, que solo probaba la librería, no código de Bondy; `SYSTEM_CHANNELS` de `bondy/app_utils/browser.py`; y las ramas heurísticas de `classifyFinding` en `bondy/resources/web/app.js` (el servidor siempre envía `wcag` y `title`; nuevo test que lo fija).
 - Modelos sin uso en `agent.py`: `Evidence`, `Finding`, `FixSuggestion`, `FindingsReport`, `FixesReport`.
 - `bondy/fast_api_app.py`: `InMemoryRunner`/agente ADK en `/api/audit`, `_build_fallback_app`, `FALLBACK_MODEL`, `_skip_note`, `_compute_axe_stats` y el bucle de reintentos propio (ahora los cubre la politica unica de `bondy/core/providers`). `bondy/agent.py` y el modo agente no cambian.
 - Código muerto de la migración a `bondy/core`: `bondy/app_utils/audit_schema.py` (`AuditFix`, `parse_audit_response`; nada fuera de sus tests lo importaba), `tests/unit/test_audit_schema.py` y `bondy.resources.AXE_SCAN_SCRIPT`. `docs/architecture.md` apunta ahora a `web_audit.py` para el contrato de `/api/audit`.
@@ -168,10 +169,10 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 - [x] Evitar duplicados entre axe y `text-contrast-calculator` (comprobar en una corrida real). Fusionados por `bondy/core/dedupe.py` cuando ambos apuntan al mismo elemento (selector unico o HTML).
 
 **Deuda técnica**
-- [ ] `ALLOWED_SOURCES` sin uso en `security.py` (usar `Path.resolve()` + `is_relative_to()`).
+- [x] `ALLOWED_SOURCES` sin uso en `security.py` (eliminada; ver Removed).
 - [x] Rutas dependientes del CWD (`skills_dir`, `FileResponse("web/index.html")`).
 - [x] `git-commit-formatter` se carga en el toolset del agente aunque no es de accesibilidad (movida a `~/.claude/skills/`).
-- [ ] `github_server.py` sin uso y con `token` expuesto como argumento de herramienta.
+- [x] `github_server.py` sin uso y con `token` expuesto como argumento de herramienta (eliminado; ver Removed).
 - [ ] Frontend: `onclick` inline, `alert()`, `aria-expanded` en `finding-header`, estilos inline.
 - [ ] `pyproject.toml`: autor/descripción placeholder y `ty` con `python-version = "3.10"`.
 - [ ] **Refactorizar el código con el agente `refactor`** (auditoría de código limpio, SOLID y deuda técnica; foco en `fast_api_app.py`, `agent.py`, `vision_tools.py` y `web/app.js`).

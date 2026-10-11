@@ -659,66 +659,14 @@ async function applyFix(findingBody, filePath, btn) {
     }
 }
 
+// The server (web_audit.py) always sends `wcag`, `severity` and `title`.
 function classifyFinding(fix) {
-    if (fix.wcag && fix.title) {
-        return {
-            wcag: fix.wcag,
-            severity: fix.severity || 'warning',
-            title: fix.title,
-            agent: 'AccessibilityAuditor',
-            desc: fix.explanation || 'Accessibility issue detected.'
-        };
-    }
-
-    const id = (fix.finding_id || '').toLowerCase();
-    const exp = (fix.explanation || '').toLowerCase();
-    const before = (fix.before || '').toLowerCase();
-
-    let wcag = '1.1.1';
-    let severity = 'critical';
-    let title = 'Accessibility issue detected';
-    let agent = 'AccessibilityAuditor';
-    let desc = 'The element does not conform to the WCAG guidelines.';
-
-    if (id.includes('img') || id.includes('alt') || before.includes('<img') || exp.includes('alt text') || exp.includes('image')) {
-        wcag = '1.1.1';
-        severity = 'critical';
-        title = 'Image missing alternative text';
-        agent = 'ImageAuditor';
-        desc = 'Non-decorative images must have descriptive alt text so screen reader users understand their meaning and purpose.';
-    } else if (id.includes('form') || id.includes('label') || id.includes('input') || id.includes('textarea') || id.includes('select') || before.includes('<input') || before.includes('<textarea') || before.includes('<select') || exp.includes('label')) {
-        wcag = '1.3.1';
-        severity = 'critical';
-        title = 'Form input missing associated label';
-        agent = 'FormAuditor';
-        desc = 'Form controls must have associated labels (either via "for" attribute, wrapping, or ARIA attributes) to describe their purpose.';
-    } else if (id.includes('contrast') || id.includes('color') || exp.includes('contrast') || exp.includes('color')) {
-        wcag = '1.4.3';
-        severity = 'warning';
-        title = 'Insufficient text color contrast ratio';
-        agent = 'DocAuditor';
-        desc = 'The contrast ratio between text and its background must be at least 4.5:1 (or 3:1 for large text) to be readable.';
-    } else if (id.includes('link') || id.includes('button') || before.includes('<a ') || before.includes('<button') || exp.includes('link') || exp.includes('button')) {
-        wcag = '2.4.4';
-        severity = 'critical';
-        title = 'Empty interactive element (link/button)';
-        agent = 'DocAuditor';
-        desc = 'Interactive elements like links and buttons must have accessible names (visible text or ARIA labels) so assistive technologies can announce them.';
-    } else if (id.includes('lang') || id.includes('html') || before.includes('<html') || exp.includes('lang attribute') || exp.includes('language')) {
-        wcag = '3.1.1';
-        severity = 'critical';
-        title = 'Document language attribute missing';
-        agent = 'DocAuditor';
-        desc = 'The root HTML element must have a valid lang attribute conforming to BCP 47 (e.g. "es", "en") so screen readers parse correct voice outputs.';
-    } else if (id.includes('trap') || id.includes('focus') || id.includes('tabindex') || exp.includes('focus') || exp.includes('keyboard')) {
-        wcag = '2.1.2';
-        severity = 'critical';
-        title = 'Keyboard accessibility issue / focus trap';
-        agent = 'KeyboardAuditor';
-        desc = 'Keyboard focus must not be trapped in interactive elements, and tab order must be logical and intuitive.';
-    }
-
-    return { wcag, severity, title, agent, desc };
+    return {
+        wcag: fix.wcag || 'Best practice',
+        severity: fix.severity || 'warning',
+        title: fix.title || fix.finding_id || 'Accessibility issue detected',
+        desc: fix.explanation || 'Accessibility issue detected.'
+    };
 }
 
 function escapeHtml(unsafe) {

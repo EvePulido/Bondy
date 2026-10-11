@@ -48,7 +48,6 @@ DEAD_PROXY_ARGS = [
     "--proxy-bypass-list=<-loopback>",
 ]
 INSTALL_COMMAND = "python -m playwright install chromium"
-SYSTEM_CHANNELS = ("chrome", "msedge")
 
 SYSTEM_BROWSER_CANDIDATES = {
     "chrome": [

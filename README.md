@@ -85,7 +85,7 @@ flowchart TD
     REPORT --> WEB
 ```
 
-Details, the module map and what is legacy or optional (the ADK agent `bondy/agent.py`, which the web app mounts only on request, and the MCP server) are in [docs/architecture.md](docs/architecture.md). The history of decisions and pending work is in [docs/improvement-plan.md](docs/improvement-plan.md) and [CHANGELOG.md](CHANGELOG.md).
+Details, the module map and what is legacy or optional (the ADK agent `bondy/agent.py`, which the web app mounts only on request) are in [docs/architecture.md](docs/architecture.md). The history of decisions and pending work is in [docs/improvement-plan.md](docs/improvement-plan.md) and [CHANGELOG.md](CHANGELOG.md).
 
 ## Quick Start
 
@@ -112,10 +112,9 @@ uv pip install "bondy[server,agent]"            # from a built wheel / index
 | Extra | Adds | Needed for |
 | :--- | :--- | :--- |
 | _(none)_ | `playwright`, `google-genai`, `pydantic` | CLI: deterministic scanners and the Gemini image stage |
-| `server` | `fastapi`, `uvicorn` (`pyproject.toml` still pins `python-dotenv`, but nothing uses it any more) | Local web UI / HTTP API (`bondy.fast_api_app`) |
+| `server` | `fastapi`, `uvicorn` | Local web UI / HTTP API (`bondy.fast_api_app`) |
 | `agent` | `google-adk` | Only needed to mount the ADK agent routes (`BONDY_ENABLE_AGENT_API=1`, see [Quick start: web UI](#quick-start-web-ui)). `pyproject.toml` still says `server` "requires `agent` as well", and the dev group and the Docker image install both; running `server` alone has not been verified in a clean environment |
 | `gcp` | `google-adk[gcp]`, Cloud Logging, GCS, OpenTelemetry GenAI | Cloud Run / Vertex AI deployments only |
-| `mcp` | `mcp`, `PyGithub` | `mcp_server/github_server.py` |
 | `eval`, `lint` | evaluation / ruff, ty, codespell | Evaluations and linting |
 
 **Telemetry is off by default.** Nothing is sent to Google Cloud unless you install the `gcp` extra *and* opt in with `BONDY_CLOUD_LOGGING=1` (Cloud Logging) and/or `LOGS_BUCKET_NAME` + `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT` (GenAI telemetry).
