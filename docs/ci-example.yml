@@ -1,9 +1,8 @@
 # Example GitHub Actions workflow for Bondy. It is NOT active: copy it to
 # .github/workflows/accessibility.yml in the repository you want to scan.
 #
-# TODO(verify): `uses: ./` below assumes this file lives in the Bondy repository
-# itself. In another repository use `<owner>/Bondy@<tag or commit>` once Bondy
-# publishes the action; that coordinate does not exist yet.
+# `uses: ./` below assumes this file lives in the Bondy repository itself. In
+# another repository use `EvePulido/Bondy@v0.1.1` (a release tag or a commit).
 name: Accessibility
 
 on:
@@ -23,7 +22,7 @@ jobs:
         with:
           fetch-depth: 0 # needed by `since`
 
-      - uses: ./ # TODO(verify): see the note above
+      - uses: ./ # in another repository: EvePulido/Bondy@v0.1.1
         with:
           path: site
           fail-on: critical

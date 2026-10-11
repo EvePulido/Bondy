@@ -6,8 +6,8 @@
 # .pre-commit-config.yaml of your project:
 #
 #   repos:
-#     - repo: https://github.com/<owner>/Bondy   # TODO: the real repository URL
-#       rev: <tag or commit of a Bondy release>
+#     - repo: https://github.com/EvePulido/Bondy
+#       rev: v0.1.1                           # a release tag or a commit
 #       hooks:
 #         - id: bondy
 #           args: [--fail-on, warning]            # extra `bondy scan` flags
