@@ -5,6 +5,7 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- `bondy/core/netguard.py`: único descargador de URLs remotas, `fetch_public_bytes()` (P0-1 de `docs/refactor-plan.md`). Resuelve el host una sola vez, exige que **todas** las IP sean públicas y conecta a esa IP ya validada (Host/SNI/certificado con el hostname original), por lo que un DNS rebinding entre la comprobación y la conexión ya no llega a hosts internos; revalida cada redirección (máx. 3), rechaza credenciales en la URL (`user:pass@`), usa el puerto por defecto según el esquema (80/443) y limita los bytes leídos. `core/images.py`, `vision_tools._load_image` y el script de skill `fetch_image.py` delegan en él (`urlopen` ya no se usa en `bondy/`). Tests en `tests/unit/test_netguard.py`.
 - `.github/workflows/ci.yml`: matriz {ubuntu, windows, macos} x Python {3.11, 3.13}; `uv sync --frozen --extra server --extra agent --extra lint`, `playwright install chromium`, `ruff check`, `ruff format --check`, `ty check bondy`, `pytest tests/unit`. Acciones fijadas por SHA (checkout v7.0.1, setup-python v7.0.0, verificados con `git ls-remote`), `uv==0.11.21` por pip, `permissions: contents: read`, `concurrency` con cancel-in-progress, `fail-fast: false`, `timeout-minutes: 30`. **No ejecutado en GitHub.**
 - Fusion de duplicados entre escaneres (`bondy/core/dedupe.py`, llamada desde `build_report`): el mismo problema sobre el mismo elemento (p. ej. `<a href="/search"><img></a>` sin nombre: axe `link-name` + `axe-tree` + `accessible-name`; axe `color-contrast` + `contrast`) se informa una sola vez, con la mejor evidencia (axe, luego `accessible-name`/`labels`, luego `axe-tree`/`contrast`), peor severidad y union de criterios WCAG. El detalle queda en `merged_from` (JSON, SARIF `properties.mergedFrom`, Markdown/HTML "Also reported by") y el resumen indica `duplicates_merged` (`findings.duplicates_merged`; linea "Duplicates merged" en terminal). Demo_sites: 59 -> 36 hallazgos; caso minimo propio: 19 -> 9. No se fusionan problemas de otra naturaleza (contraste vs nombre, `alt` de la imagen vs nombre del enlace, `focus-order`, `region`...). Tests `tests/unit/test_dedupe.py`.
 - `accessible-name` y `labels` informan el HTML del elemento (`nodes[].html`), asi que ahora tienen `line` y `bondy-ignore` los localiza con precision; su huella no cambia (selector primero).
@@ -15,7 +16,7 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 - `tests/unit/test_network_guard.py` (0 peticiones a un servidor local por escáner, política, fallback del lanzador) y `tests/unit/test_static_mode.py`.
 - `/api/audit` anota cada fix con `before_occurrences`; la UI solo ofrece "Apply to File" si el fragmento aparece exactamente una vez y explica por qué no cuando son 0 o más de 1.
 - `tests/unit/test_apply_fix.py`: tests de aplicación única, ambigüedad (409) y rechazo de clientes remotos.
-- `app/app_utils/render_page.py`: renderiza páginas a PNG con Chromium en un subproceso. Solo permite `file://` dentro de `demo_sites/` y hosts http(s) públicos (anti-SSRF).
+- `app/app_utils/render_page.py`: renderiza páginas a PNG con Chromium en un subproceso. Solo permite `file://` dentro de `demo_sites/` (desde entonces ya no permite hosts http(s); ver `test_render_page_allows_no_remote_hosts`).
 - `app/app_utils/vision_tools.py`: herramientas `analyze_rendered_page` (Gemini ve la página renderizada) y `classify_image_decorative` (heurísticas deterministas + veredicto de visión: decorative / informative / functional). Ambas usan `BONDY_VISION_MODEL` con respaldo `BONDY_FALLBACK_MODEL`.
 - `tests/unit/test_vision_tools.py`: tests de heurísticas y del render.
 - Skill `axe-accessibility-scanner` (`.agents/skills/`): línea base determinista con axe-core 4.10.2 (WCAG 2.0/2.1/2.2 A/AA + best-practice) y árbol de accesibilidad de Chromium para detectar controles sin nombre accesible. Corre offline (aborta peticiones de red de la página). Devuelve conteos reales de `passes`/`violations`.
@@ -116,6 +117,8 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 - `FakeProvider` expone `endpoint_host`; `semantic.prepare` y `scan_loaded` aceptan callbacks de progreso (`progress`, `on_page`).
 
 ### Fixed
+- `security.py`: la contención de rutas usaba `startswith(base_dir)` sin separador (`.../Bondy-evil` pasaba como `.../Bondy`); ahora `_is_within()` exige el separador y compara sin distinguir mayúsculas en Windows.
+- `vision_tools._load_image` seguía redirecciones sin revalidar (un 302 a `169.254.169.254` se seguía) y `fetch_image.py` descargaba cualquier URL sin guard ni tope de bytes.
 - `pyproject.toml`: eliminado el paquete inexistente `frontend` de hatch.
 - `web/app.js` (`applyFix`): `originalText` fuera del `try` (evita `ReferenceError` en el `catch`).
 - `web/app.js`: respuesta no-array ya no rompe el render de resultados.

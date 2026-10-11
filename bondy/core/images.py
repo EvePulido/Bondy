@@ -10,9 +10,7 @@ from __future__ import annotations
 
 import os
 import re
-import urllib.error
 import urllib.parse
-import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass
 from html.parser import HTMLParser
@@ -192,38 +190,30 @@ def _check_type(data: bytes) -> str:
     raise ImageLoadError("not a recognized image format")
 
 
-class _PublicRedirects(urllib.request.HTTPRedirectHandler):
-    """Re-validates every redirect target against the public-host guard."""
-
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
-        from bondy.app_utils.security import validate_public_url
-
-        try:
-            validate_public_url(newurl)
-        except ValueError as e:
-            raise urllib.error.URLError(f"redirect blocked: {e}") from e
-        return super().redirect_request(req, fp, code, msg, headers, newurl)
-
-
 def _load_remote(url: str, max_bytes: int) -> bytes:
-    from bondy.app_utils.security import validate_public_url
+    """Downloads through the single SSRF-safe fetcher (``bondy.core.netguard``):
+    validated + pinned IP, every redirect re-validated, hard byte cap."""
+    from bondy.core.netguard import (
+        FetchError,
+        NetGuardError,
+        ResponseTooLarge,
+        fetch_public_bytes,
+    )
 
     try:
-        validate_public_url(url)
-    except ValueError as e:
+        return fetch_public_bytes(url, max_bytes, REMOTE_TIMEOUT_S).data
+    except NetGuardError as e:
         raise ImageLoadError(f"remote image blocked: {e}") from e
-    opener = urllib.request.build_opener(_PublicRedirects)
-    req = urllib.request.Request(url, headers={"User-Agent": "Bondy/1.0"})
-    try:
-        with opener.open(req, timeout=REMOTE_TIMEOUT_S) as res:
-            data = res.read(max_bytes + 1)
-    except urllib.error.HTTPError as e:
-        raise ImageLoadError(f"HTTP {e.code} when downloading the image") from e
-    except (urllib.error.URLError, TimeoutError, OSError) as e:
+    except ResponseTooLarge as e:
+        raise ImageLoadError(
+            f"image larger than {max_bytes // (1024 * 1024)} MB"
+        ) from e
+    except FetchError as e:
+        if e.status is not None:
+            raise ImageLoadError(f"HTTP {e.status} when downloading the image") from e
         raise ImageLoadError(f"could not download the image: {e}") from e
-    if len(data) > max_bytes:
-        raise ImageLoadError(f"image larger than {max_bytes // (1024 * 1024)} MB")
-    return data
+    except (TimeoutError, OSError) as e:
+        raise ImageLoadError(f"could not download the image: {e}") from e
 
 
 def _load_local(occ: ImageOccurrence, ref: str, max_bytes: int) -> bytes:

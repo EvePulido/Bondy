@@ -247,6 +247,7 @@ def test_remote_images_opt_out_makes_no_download_and_goes_to_manual_review(
 
     monkeypatch.setattr("urllib.request.OpenerDirector.open", forbidden)
     monkeypatch.setattr("bondy.app_utils.security.validate_public_url", forbidden)
+    monkeypatch.setattr("bondy.core.netguard.fetch_public_bytes", forbidden)
     report, p = run(tmp_path, remote_images=False)  # default loader
     assert p.http_requests == 0 and report.usage.requests == 0
     assert [o.recommendation for o in report.images] == ["needs_manual_review"] * 2

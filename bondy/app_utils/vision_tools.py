@@ -11,7 +11,6 @@ import subprocess
 import sys
 import tempfile
 import time
-import urllib.request
 from pathlib import Path
 
 from bondy.core.alt_rules import (  # noqa: F401 - re-exported for agent mode
@@ -89,14 +88,11 @@ def _generate(contents: list, json_output: bool = False, schema=None) -> str:
 def _load_image(url: str) -> tuple[bytes, str]:
     """Loads an image from a public URL or from the local examples folder."""
     if url.startswith(("http://", "https://")):
-        from bondy.app_utils.security import validate_public_url
+        from bondy.core.netguard import fetch_public_bytes
 
-        validate_public_url(url)
-        req = urllib.request.Request(url, headers={"User-Agent": "Bondy/1.0"})
-        with urllib.request.urlopen(req, timeout=10) as response:
-            data = response.read(MAX_IMAGE_BYTES)
-            mime = response.headers.get_content_type()
-        return data, mime if mime.startswith("image/") else "image/jpeg"
+        res = fetch_public_bytes(url, MAX_IMAGE_BYTES, 10)
+        mime = res.content_type
+        return res.data, mime if mime.startswith("image/") else "image/jpeg"
 
     demo_dir = (BASE_DIR / "examples").resolve()
     suffix = url.replace("/", os.sep).lstrip(os.sep)
