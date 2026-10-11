@@ -1,7 +1,7 @@
 name: CI
 
 # Quality gate for every push/PR: lint, format, types and unit tests on
-# Linux, Windows and macOS. Separate from bondy-audit.yml on purpose.
+# Linux, Windows and macOS.
 # Unit tests never call Gemini (they use FakeProvider / --no-llm).
 
 on:

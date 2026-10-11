@@ -127,7 +127,6 @@ These remain in the repository but are **not** part of the CLI or of the web UI 
 | `bondy/app_utils/vision_tools.py`, `render_page.py` | Gemini vision tools and page renderer used by the ADK agent. | Legacy (used by the agent). Models come from `Settings` on every call; remote images go through `core/netguard.py`. |
 | `bondy/fast_api_app.py` ADK mount | `get_fast_api_app(...)` from ADK, mounted only with `BONDY_ENABLE_AGENT_API=1` and behind `_AgentApiGuard`. The app is otherwise a plain FastAPI app. | Opt-in. `pyproject.toml` still declares `server` as requiring `agent` (extras not yet split), but by code reading `google.adk` is imported only when the flag is set; running `server` without `agent` has not been verified. |
 | Cloud Run deployment (`agents-cli`, Terraform, `gcp` extra, Cloud Logging/OTel) | Deployment of the web app to Google Cloud. | Optional, opt-in telemetry. |
-| `.github/workflows/bondy-audit.yml` | Older CI workflow (`uv sync --all-extras`, ruff, unit tests). | Superseded by `ci.yml`; not verified to be intentionally kept. |
 
 ---
 
