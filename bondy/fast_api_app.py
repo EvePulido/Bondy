@@ -45,7 +45,9 @@ logger = logging.getLogger(__name__)
 if os.getenv("BONDY_CLOUD_LOGGING") == "1":
     try:
         import google.auth
-        from google.cloud import logging as google_cloud_logging
+        from google.cloud import (  # ty: ignore[unresolved-import]
+            logging as google_cloud_logging,
+        )
 
         google.auth.default()
         logger = google_cloud_logging.Client().logger(__name__)

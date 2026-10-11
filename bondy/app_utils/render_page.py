@@ -4,7 +4,7 @@ Runs as a separate process (see vision_tools.py) so Playwright's sync API never
 collides with the running asyncio event loop of the API server.
 
 Usage:
-    python -m bondy.app_utils.render_page --out shot.png --source demo_sites/site_1
+    python -m bondy.app_utils.render_page --out shot.png --source examples/site_1
     python -m bondy.app_utils.render_page --out shot.png < page.html
 """
 
@@ -15,7 +15,7 @@ import tempfile
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parents[2]
-DEMO_SITES = (BASE_DIR / "demo_sites").resolve()
+DEMO_SITES = (BASE_DIR / "examples").resolve()
 MAX_HEIGHT = 4000
 
 

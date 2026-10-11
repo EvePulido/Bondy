@@ -19,7 +19,7 @@ from bondy.core.pipeline import NO_KEY_NOTE
 from bondy.core.providers.fake import RATE_LIMIT_DAY, FakeProvider
 from bondy.scan import FileResult
 
-DEMO = Path(__file__).parents[2] / "demo_sites"
+DEMO = Path(__file__).parents[2] / "examples"
 PNG = b"\x89PNG\r\n\x1a\n" + b"0" * 32
 HTML = "<html lang='en'><body><p>hi</p></body></html>"
 CONTRACT_KEYS = {"finding_id", "wcag", "severity", "title", "before", "after"} | {
@@ -76,7 +76,7 @@ def demo_site():
         '<html lang="en"><body><img src="a.png"></body></html>', encoding="utf-8"
     )
     (folder / "a.png").write_bytes(PNG)
-    yield f"demo_sites/{name}"
+    yield f"examples/{name}"
     shutil.rmtree(folder, ignore_errors=True)
 
 
@@ -371,6 +371,12 @@ def test_quota_marker_matches_the_semantic_stage_text():
 
 
 def test_audit_missing_demo_file_is_500(client):
-    r = client.post("/api/audit", json={"source": "demo_sites/does_not_exist"})
+    r = client.post("/api/audit", json={"source": "examples/does_not_exist"})
     assert r.status_code == 500
     assert "File not found" in r.json()["message"]
+
+
+def test_legacy_demo_sites_path_explains_the_rename(client, monkeypatch):
+    r = client.post("/api/audit", json={"source": "demo_sites/site_1_bad_alt"})
+    assert r.status_code == 403
+    assert "renamed to 'examples'" in r.json()["message"]

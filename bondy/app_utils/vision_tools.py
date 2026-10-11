@@ -87,7 +87,7 @@ def _generate(contents: list, json_output: bool = False, schema=None) -> str:
 
 
 def _load_image(url: str) -> tuple[bytes, str]:
-    """Loads an image from a public URL or from the local demo_sites folder."""
+    """Loads an image from a public URL or from the local examples folder."""
     if url.startswith(("http://", "https://")):
         from bondy.app_utils.security import validate_public_url
 
@@ -98,7 +98,7 @@ def _load_image(url: str) -> tuple[bytes, str]:
             mime = response.headers.get_content_type()
         return data, mime if mime.startswith("image/") else "image/jpeg"
 
-    demo_dir = (BASE_DIR / "demo_sites").resolve()
+    demo_dir = (BASE_DIR / "examples").resolve()
     suffix = url.replace("/", os.sep).lstrip(os.sep)
     for root, _, files in os.walk(demo_dir):
         for name in files:
@@ -249,7 +249,7 @@ def analyze_rendered_page(source: str = "", html: str = "") -> str:
     decorative in their visual context.
 
     Args:
-        source: Demo site folder, e.g. 'demo_sites/site_1_bad_alt' (preferred, so
+        source: Demo site folder, e.g. 'examples/site_1_bad_alt' (preferred, so
             relative CSS/images load). Leave empty when passing raw html.
         html: Full HTML document, used only when source is empty.
 
@@ -291,7 +291,9 @@ def analyze_rendered_page(source: str = "", html: str = "") -> str:
             "Mention where each problem is (heading/section/visible text). "
             "If you see no problems, say so. Do not invent issues."
         )
-        text = _generate([types.Part.from_bytes(data=image, mime_type="image/png"), prompt])
+        text = _generate(
+            [types.Part.from_bytes(data=image, mime_type="image/png"), prompt]
+        )
         return f"Visual analysis: {text}"
     except Exception as e:
         return f"Error analyzing rendered page: {e}"

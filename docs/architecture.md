@@ -81,7 +81,7 @@ To meet secure coding standards, the project implements three layers of control:
 
 1. **Deterministic Path and Input Guardrail (`bondy/app_utils/security.py`):**
    Before launching Playwright browser instances, the input source is evaluated. The agent is restricted from navigating to arbitrary external URLs. It only allows:
-   * Explicit files or directories within the local `demo_sites/` sandbox.
+   * Explicit files or directories within the local `examples/` sandbox.
    * Statically sanitized raw HTML inputs directly pasted by the user.
 2. **Fine-Grained MCP Privileges (`mcp_server/github_server.py`):**
    The GitHub reader Model Context Protocol server uses read-only calls (`read_github_file` and `list_github_directory`) authorized under a minimal fine-grained personal access token.

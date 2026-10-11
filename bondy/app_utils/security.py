@@ -2,9 +2,9 @@ import os
 
 # Statically allowed paths to prevent navigation to arbitrary URLs
 ALLOWED_SOURCES = {
-    "demo_sites/site_1_bad_alt",
-    "demo_sites/site_2_focus_trap",
-    "demo_sites/site_3_mixed_errors",
+    "examples/site_1_bad_alt",
+    "examples/site_2_focus_trap",
+    "examples/site_3_mixed_errors",
 }
 
 
@@ -30,18 +30,21 @@ def validate_input_before_audit(source: str, raw_html: str | None = None) -> Non
     # The final path MUST be contained within the base_dir to prevent Directory Traversal
     if not resolved_path.startswith(base_dir):
         raise ValueError(
-            "Path traversal detected. Recovery: Please provide a safe, direct path inside the 'demo_sites' directory without using '../' or absolute paths."
+            "Path traversal detected. Recovery: Please provide a safe, direct path inside the 'examples' directory without using '../' or absolute paths."
         )
 
-    # Allow any file or directory strictly inside the 'demo_sites' folder
-    demo_sites_abs = os.path.abspath(os.path.join(base_dir, "demo_sites"))
-    is_allowed = resolved_path == demo_sites_abs or resolved_path.startswith(
-        demo_sites_abs + os.sep
+    # Allow any file or directory strictly inside the 'examples' folder
+    examples_abs = os.path.abspath(os.path.join(base_dir, "examples"))
+    is_allowed = resolved_path == examples_abs or resolved_path.startswith(
+        examples_abs + os.sep
     )
 
     if not is_allowed:
+        renamed = ""
+        if clean_source.replace("\\", "/").split("/", 1)[0] == "demo_sites":
+            renamed = " The 'demo_sites' folder was renamed to 'examples'."
         raise ValueError(
-            f"The path '{source}' is not allowed for security reasons. Recovery: Please make sure the path is strictly inside the 'demo_sites' folder, or switch to the 'HTML' tab to paste your code directly."
+            f"The path '{source}' is not allowed for security reasons.{renamed} Recovery: Please make sure the path is strictly inside the 'examples' folder, or switch to the 'HTML' tab to paste your code directly."
         )
 
 

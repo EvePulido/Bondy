@@ -220,5 +220,5 @@ KAGGLE_WRITEUP.md
 # Artifacts
 artifacts/
 
-# Bondy cache/state written when scanning (this repo's demo_sites included)
+# Bondy cache/state written when scanning (this repo's examples included)
 .bondy/

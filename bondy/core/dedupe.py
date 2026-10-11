@@ -34,8 +34,12 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from bondy.core.source import PageIndex, parse_elements
+
+if TYPE_CHECKING:  # report.py imports this module, so only for annotations
+    from bondy.core.report import Item
 
 # axe rules that say "this control has no accessible name / label".
 _AXE_NAME_RULES = frozenset(
@@ -131,11 +135,11 @@ def _score(item) -> tuple[int, int, int, int]:
 
 @dataclass
 class _Group:
-    leader: object
+    leader: Item
     key: tuple[Signature, ...]
     pos: int
-    members: list
-    rules: set
+    members: list[Item]
+    rules: set[str]
 
 
 def _compatible_lines(a, b) -> bool:
@@ -143,15 +147,15 @@ def _compatible_lines(a, b) -> bool:
 
 
 def dedupe_items(
-    items: Sequence, indexes: Mapping[str, PageIndex] | None = None
-) -> tuple[list, int]:
+    items: Sequence[Item], indexes: Mapping[str, PageIndex] | None = None
+) -> tuple[list[Item], int]:
     """Returns ``(items, merged)``: ``items`` without the duplicates (survivors
     keep their original relative order) and how many items were absorbed.
 
     Idempotent: running it again on its own output merges nothing.
     """
     indexes = indexes or {}
-    candidates: dict[tuple[str, str], list[tuple[int, object, tuple]]] = {}
+    candidates: dict[tuple[str, str], list[tuple[int, Item, tuple]]] = {}
     for pos, item in enumerate(items):
         fam = family(item)
         if fam is None:
@@ -162,7 +166,7 @@ def dedupe_items(
         candidates.setdefault((item.file, fam), []).append((pos, item, key))
 
     absorbed: set[int] = set()
-    survivors: dict[int, object] = {}  # position of the leader -> merged item
+    survivors: dict[int, Item] = {}  # position of the leader -> merged item
     merged = 0
     for entries in candidates.values():
         # Total order independent of how scanners were listed: best context
@@ -209,7 +213,7 @@ def dedupe_items(
     return out, merged
 
 
-def _merge(group: _Group):
+def _merge(group: _Group) -> Item:
     """The leader enriched with what the other members add."""
     leader = group.leader
     others = group.members[1:]

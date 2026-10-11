@@ -14,7 +14,7 @@ import re
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Literal, cast
 
 from pydantic import BaseModel, ValidationError
 
@@ -39,7 +39,7 @@ from bondy.core.images import (
     LoadedImage,
     source_key,
 )
-from bondy.core.models import ImageOccurrence, ImageOutcome
+from bondy.core.models import ImageOccurrence, ImageOutcome, Recommendation
 from bondy.core.providers.base import (
     LLMProvider,
     LLMRequest,
@@ -148,7 +148,7 @@ def _outcome(occ: ImageOccurrence, recommendation: str, **kw) -> ImageOutcome:
         src=occ.src,
         tag=occ.tag,
         current_alt=occ.alt,
-        recommendation=recommendation,  # type: ignore[arg-type]
+        recommendation=cast(Recommendation, recommendation),
         static_problems=alt_text_static_checks(occ.alt),
         **kw,
     )

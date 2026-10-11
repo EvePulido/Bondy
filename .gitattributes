@@ -1,0 +1,17 @@
+# Single line-ending policy for every OS (and CI): LF in the repo and in the
+# working tree. ruff is configured with line-ending = "lf" to match.
+* text=auto eol=lf
+
+# Binary / vendored assets: never touch.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.eot binary
+*.pdf binary
+*.zip binary
+*.min.js -diff

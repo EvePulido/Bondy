@@ -6,7 +6,7 @@ This file defines the project context and persistent security standards that all
 
 ## 1. Mandatory Input Validation (Security First)
 * **Rule:** Before invoking any web navigation or automation tool via Playwright (e.g., in focus validators or focus trap detectors), you must validate the input parameters against the deterministic security module in `bondy/app_utils/security.py` using the `validate_input_before_audit` function.
-* **Allowed Sources:** Only allow local demo directories statically registered in `ALLOWED_SOURCES` (`demo_sites/...`) or raw HTML content pasted directly. Arbitrary external HTTP requests to untrusted internet URLs are strictly prohibited.
+* **Allowed Sources:** Only allow local demo directories statically registered in `ALLOWED_SOURCES` (`examples/...`) or raw HTML content pasted directly. Arbitrary external HTTP requests to untrusted internet URLs are strictly prohibited.
 
 ## 2. Code Quality and Pre-Commit Remediation Loop
 * **Rule:** If a `git commit` or test execution fails due to a `pre-commit` hook check (e.g., Ruff linting, Ruff formatting, or type checking errors), you must:

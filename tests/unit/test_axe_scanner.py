@@ -9,7 +9,7 @@ SCRIPT = (
     Path(__file__).parents[2]
     / "bondy/resources/skills/axe-accessibility-scanner/scripts/axe_scan.py"
 )
-SITE3 = Path(__file__).parents[2] / "demo_sites/site_3_mixed_errors/index.html"
+SITE3 = Path(__file__).parents[2] / "examples/site_3_mixed_errors/index.html"
 
 
 def _load():

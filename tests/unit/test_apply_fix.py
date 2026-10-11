@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 
 from bondy.fast_api_app import _annotate_before_matches, app
 
-DEMO = Path(__file__).parents[2] / "demo_sites"
+DEMO = Path(__file__).parents[2] / "examples"
 
 
 @pytest.fixture
@@ -20,7 +20,7 @@ def site():
         "</body></html>",
         encoding="utf-8",
     )
-    yield f"demo_sites/{name}", folder / "index.html"
+    yield f"examples/{name}", folder / "index.html"
     shutil.rmtree(folder, ignore_errors=True)
 
 

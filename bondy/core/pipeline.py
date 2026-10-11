@@ -21,6 +21,7 @@ from collections.abc import Callable, Iterable, Sequence
 from dataclasses import asdict
 from functools import partial
 from pathlib import Path
+from typing import cast
 
 from bondy.app_utils.browser import browser_session
 from bondy.config import ConfigError, Settings
@@ -107,7 +108,7 @@ def project_root(target: Target) -> Path:
                 "The paths have no common folder (different drives?). "
                 "Scan them in separate runs."
             ) from e
-    target = Path(target)
+    target = Path(cast("Path | str", target))  # not a list/tuple here
     return (target if target.is_dir() else target.parent).resolve()
 
 

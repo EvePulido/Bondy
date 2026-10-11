@@ -42,7 +42,7 @@ def read_local_file(file_path: str) -> str:
     """Reads the content of an HTML file to scan for accessibility issues.
 
     Args:
-        file_path: The folder name of the demo site (e.g. 'demo_sites/site_1_bad_alt').
+        file_path: The folder name of the demo site (e.g. 'examples/site_1_bad_alt').
                    The function automatically resolves the full path to index.html.
     """
     from bondy.app_utils.security import get_safe_demo_path
@@ -69,13 +69,11 @@ root_agent = LlmAgent(
     model=Gemini(
         model="gemini-flash-latest",
         # Retry only the failed request (429/503) instead of restarting the audit
-        retry_options=types.HttpRetryOptions(
-            attempts=5, initial_delay=5, max_delay=60
-        ),
+        retry_options=types.HttpRetryOptions(attempts=5, initial_delay=5, max_delay=60),
     ),
     instruction="""You are Bondy, an expert web accessibility auditor and refactorer.
 
-When a user sends you a source path (e.g. 'demo_sites/site_1_bad_alt'), you MUST:
+When a user sends you a source path (e.g. 'examples/site_1_bad_alt'), you MUST:
 
 STEP 1 — Call read_local_file(file_path=<source>) to get the HTML content.
 

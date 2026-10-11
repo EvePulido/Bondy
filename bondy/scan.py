@@ -15,7 +15,7 @@ import time
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from bondy.app_utils.browser import INSTALL_COMMAND, BrowserUnavailableError
 from bondy.app_utils.security import validate_input_before_audit
@@ -89,7 +89,7 @@ def discover(
                     seen.add(key)
                     merged.append(p)
         return merged
-    target = Path(target)
+    target = Path(cast("Path | str", target))  # not a list/tuple here
     if target.is_file():
         return [target]
     if not target.is_dir():
@@ -115,6 +115,8 @@ def discover(
 def _load_script(skill: str, script: str):
     path = SKILLS_DIR / skill / "scripts" / script
     spec = importlib.util.spec_from_file_location(f"bondy_scan_{path.stem}", str(path))
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Cannot load scanner script: {path}")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -391,8 +393,9 @@ def run_scanners(
         try:
             found = run(html)
             findings.extend(found)
-            if stats is not None and getattr(found, "stats", None):
-                stats.update(found.stats)
+            found_stats = getattr(found, "stats", None)
+            if stats is not None and found_stats:
+                stats.update(found_stats)
         except BrowserUnavailableError as e:
             unavailable[name] = str(e)
         except Exception as e:

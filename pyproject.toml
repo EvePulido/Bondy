@@ -69,7 +69,7 @@ line-length = 88
 target-version = "py311"
 
 [tool.ruff.format]
-line-ending = "native"
+line-ending = "lf"
 
 [tool.ruff.lint]
 select = [
@@ -92,16 +92,14 @@ known-first-party = ["bondy"]
 # See: https://docs.astral.sh/ty/
 
 [tool.ty.environment]
-python-version = "3.10"
+python-version = "3.11"
 
 [tool.ty.src]
 exclude = [".venv/**"]
 
 [tool.ty.rules]
-# Ignore common issues with third-party libraries and dynamic code patterns
-unresolved-import = "ignore"
-unresolved-attribute = "ignore"
-invalid-argument-type = "ignore"
+# Rules that were noisy with third-party / dynamic code. unresolved-import,
+# unresolved-attribute and invalid-argument-type are active again (bondy/ is clean).
 invalid-assignment = "ignore"
 invalid-return-type = "ignore"
 possibly-missing-attribute = "ignore"

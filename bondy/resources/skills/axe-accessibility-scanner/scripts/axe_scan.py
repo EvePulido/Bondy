@@ -139,7 +139,11 @@ def scan(html: str) -> dict:
         },
         "violations": violations,
         "needs_review": [
-            {"rule_id": r["id"], "help": r.get("help"), "nodes": len(r.get("nodes", []))}
+            {
+                "rule_id": r["id"],
+                "help": r.get("help"),
+                "nodes": len(r.get("nodes", [])),
+            }
             for r in raw.get("incomplete", [])
         ],
         "unnamed_interactive_elements": unnamed,

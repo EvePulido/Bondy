@@ -102,7 +102,9 @@ def _choice(*options: str):
     return convert
 
 
-_RULE_TOKEN = re.compile(r"^(?:(?:wcag\s*)?(\d\.\d\.\d{1,2})|([a-z][a-z0-9_-]*))$", re.I)
+_RULE_TOKEN = re.compile(
+    r"^(?:(?:wcag\s*)?(\d\.\d\.\d{1,2})|([a-z][a-z0-9_-]*))$", re.I
+)
 
 
 def normalize_rule_token(token: str, where: str) -> str:

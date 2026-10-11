@@ -89,6 +89,4 @@ def test_recommendation_rules():
     assert decide_alt_recommendation([], _verdict("yes")) == "keep"
     assert decide_alt_recommendation(["redundant_prefix"], _verdict("yes")) == "fix"
     assert decide_alt_recommendation([], _verdict("no")) == "fix"
-    assert (
-        decide_alt_recommendation([], _verdict("no", "low")) == "needs_manual_review"
-    )
+    assert decide_alt_recommendation([], _verdict("no", "low")) == "needs_manual_review"

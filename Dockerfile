@@ -21,7 +21,7 @@ WORKDIR /code
 COPY ./pyproject.toml ./README.md ./uv.lock* ./
 
 COPY ./bondy ./bondy
-COPY ./demo_sites ./demo_sites
+COPY ./examples ./examples
 
 RUN uv sync --frozen --extra server --extra agent --extra gcp
 

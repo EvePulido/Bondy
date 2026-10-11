@@ -287,9 +287,9 @@ Bondy can be fully deployed to your own Google Cloud environment (Cloud Run) usi
 
 ### 5. Auditing Local Files (Usage)
 Bondy supports auditing local files seamlessly. To scan a local project:
-1. Drop your HTML files or folders into the local `demo_sites/` directory within this repository.
+1. Drop your HTML files or folders into the local `examples/` directory within this repository.
 2. Open the Bondy Web UI (`http://localhost:8080`).
-3. In the URL bar of the UI, simply type the path to your file relative to the demo folder (e.g., `demo_sites/my_folder/index.html` or just `demo_sites/my_folder`).
+3. In the URL bar of the UI, simply type the path to your file relative to the demo folder (e.g., `examples/my_folder/index.html` or just `examples/my_folder`).
 4. Bondy will read your local HTML, launch a headless browser to evaluate computed styles and interactions, and autonomously generate a JSON fix.
 
 ## Testing & Linting
@@ -319,7 +319,7 @@ Validate agent configurations, types, and manifests:
 
 All tools follow the project's security rules (`.agents/AGENTS.md`):
 
-- **Path guardrail:** only files inside `demo_sites/` or raw HTML are audited; traversal and absolute paths are rejected (`bondy/app_utils/security.py`).
+- **Path guardrail:** only files inside `examples/` or raw HTML are audited; traversal and absolute paths are rejected (`bondy/app_utils/security.py`).
 - **SSRF guard:** remote image/page URLs must resolve to public IPs; loopback, private and metadata addresses are blocked (`validate_public_url`). The axe scanner aborts every non-local network request made by the audited page.
 - **Secret redaction:** secret-looking values are replaced with `[REDACTED]` before text reaches the model, the cache or a report (best effort, not a guarantee).
 - **Untrusted output:** scanned HTML, alt text and paths are escaped in every report format (HTML, Markdown, SARIF, terminal).
