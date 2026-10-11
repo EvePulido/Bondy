@@ -12,7 +12,7 @@ import importlib.util
 import os
 import re
 import time
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -65,13 +65,30 @@ def _matches(rel: str, pattern: str) -> bool:
 
 
 def discover(
-    target: Path | str, include: Iterable[str], exclude: Iterable[str]
+    target: Path | str | Sequence[Path | str],
+    include: Iterable[str],
+    exclude: Iterable[str],
 ) -> list[Path]:
     """HTML files under ``target`` (a file or a directory), sorted, honoring globs.
+
+    ``target`` may also be a sequence of files/folders: results keep the order
+    of the arguments and a file reachable twice (a folder plus a file inside
+    it, or the same path twice) is returned once.
 
     An explicit file is always returned (include/exclude only filter folders).
     Symlinked directories are not followed.
     """
+    if isinstance(target, (list, tuple)):
+        include, exclude = list(include), list(exclude)
+        seen: set[str] = set()
+        merged: list[Path] = []
+        for one in target:
+            for p in discover(one, include, exclude):
+                key = os.path.normcase(str(p.resolve()))
+                if key not in seen:
+                    seen.add(key)
+                    merged.append(p)
+        return merged
     target = Path(target)
     if target.is_file():
         return [target]
@@ -188,9 +205,23 @@ def _run_focus_trap(html: str) -> list[dict]:
 
 def _run_focus_order(html: str) -> list[dict]:
     mod = _load_script("focus-order-validator", "focus_order.py")
+    result = mod.evaluate_focus_order(html)
+    invisible = result.get("invisible")
+    if invisible is not None:
+        # one finding per element, located by its own HTML (not "whole page")
+        return [
+            _finding(
+                "focus-order",
+                check_wcag("focus-order"),
+                "warning",
+                f"Element {i['selector']} receives focus but is not visible.",
+                nodes=[{"html": i["html"]}],
+            )
+            for i in invisible
+        ]
     return [
         _finding("focus-order", check_wcag("focus-order"), "warning", a)
-        for a in mod.evaluate_focus_order(html).get("anomalies", [])
+        for a in result.get("anomalies", [])
     ]
 
 
@@ -384,8 +415,12 @@ def scan_loaded(
     scanners: dict[str, Scanner] | None = None,
     force_static: bool = False,
     deadline: float | None = None,
+    on_page: Callable[[int, int, FileResult], None] | None = None,
 ) -> None:
     """Runs the scanners on pages already loaded with ``load_page`` (in place).
+
+    ``on_page(index, total, result)`` is called before each page is scanned
+    (live progress; it must not raise).
 
     ``deadline`` is a ``time.monotonic()`` instant: pages not started by then
     are marked skipped (``SCAN_TIMEOUT_SKIP``). Ctrl+C marks the page in
@@ -401,6 +436,8 @@ def scan_loaded(
             for r in todo[i:]:
                 r.skipped = SCAN_TIMEOUT_SKIP
             return
+        if on_page is not None:
+            on_page(i + 1, len(todo), result)
         to_run = active
         if browser_down is not None:
             to_run = {n: r for n, r in active.items() if n not in BROWSER_SCANNERS}

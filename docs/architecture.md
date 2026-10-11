@@ -63,7 +63,7 @@ Instead of separate agents, the single agent has access to these deterministic a
 ### Common Data Contract Specifications
 
 ```yaml
-AuditFix:   # bondy/app_utils/audit_schema.py
+AuditFix:   # entry of `data` in /api/audit (bondy/core/web_audit.py, built from the pipeline report)
   finding_id: string
   wcag: string
   severity: enum[critical, warning, info]

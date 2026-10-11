@@ -13,10 +13,11 @@ from __future__ import annotations
 
 import hashlib
 import html as html_lib
+import os
 import re
 import subprocess
 import time
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import asdict
 from functools import partial
 from pathlib import Path
@@ -35,6 +36,7 @@ from bondy.core.images import (
     ImageLoader,
     asset_fingerprint,
     extract_images,
+    is_remote_src,
     load_image,
 )
 from bondy.core.models import (
@@ -80,13 +82,32 @@ NO_KEY_NOTE = (
 )
 
 
-def project_root(target: Path | str) -> Path:
+Target = Path | str | Sequence[Path | str]
+
+
+def project_root(target: Target) -> Path:
+    """Folder the report's relative paths hang from.
+
+    A single file/folder: itself (or the file's folder). Several: their closest
+    common folder. Raises ``ConfigError`` when they share none (other drives).
+    """
+    if isinstance(target, (list, tuple)):
+        roots = [project_root(t) for t in target]
+        if len(roots) == 1:
+            return roots[0]
+        try:
+            return Path(os.path.commonpath([str(r) for r in roots]))
+        except ValueError as e:
+            raise ConfigError(
+                "The paths have no common folder (different drives?). "
+                "Scan them in separate runs."
+            ) from e
     target = Path(target)
     return (target if target.is_dir() else target.parent).resolve()
 
 
 def collect_images(
-    files: Iterable[FileResult], target: Path | str
+    files: Iterable[FileResult], target: Target
 ) -> list[ImageOccurrence]:
     """``<img>`` occurrences of every scanned page, in document order."""
     root = project_root(target)
@@ -292,13 +313,14 @@ def _images_fp(occs: list[ImageOccurrence]) -> str:
 
 
 def run_scan(
-    target: Path | str,
+    target: Target,
     settings: Settings,
     *,
     scanners: dict[str, Scanner] | None = None,
     provider: LLMProvider | None = None,
     loader: ImageLoader | None = None,
     progress: Callable[[str], None] | None = None,
+    notify: Callable[[str], None] | None = None,
     changed_only: bool = False,
     resume: bool = False,
     since: str | None = None,
@@ -312,6 +334,9 @@ def run_scan(
     persist page state and the resume marker.
 
     ``provider``/``loader`` are injectable (tests use ``FakeProvider``).
+    ``progress`` receives live one-line messages (page / image / batch);
+    ``notify`` receives, once and only in LLM mode, what is about to be sent to
+    the provider (before the first image is downloaded or requested).
     """
     require_prices_for_limits(settings)  # before any scanner/request
     root = project_root(target)
@@ -431,7 +456,15 @@ def run_scan(
         usage.images_found = len(todo_occs)
     if llm and todo_occs:
         stage = _semantic_stage(
-            report, settings, todo_occs, provider, loader, progress, store, deadline
+            report,
+            settings,
+            todo_occs,
+            provider,
+            loader,
+            progress,
+            store,
+            deadline,
+            notify,
         )
 
     # 4. deterministic scanners, ONE browser for the whole scan
@@ -442,6 +475,11 @@ def run_scan(
             scanners,
             force_static=settings.static,
             deadline=deadline,
+            on_page=(
+                (lambda i, n, r: progress(f"page {i}/{n}: {_rel(r.path, root)}"))
+                if progress
+                else None
+            ),
         )
     static_note = static_mode_note(results)
     if static_note:
@@ -549,12 +587,15 @@ def _semantic_stage(
     progress: Callable[[str], None] | None,
     store: Store,
     deadline: float | None,
+    notify: Callable[[str], None] | None = None,
 ):
     usage = report.usage
     if provider is None:
         from bondy.core.providers.gemini import GeminiProvider
 
         provider = GeminiProvider.from_settings(settings)
+    if notify is not None:
+        notify(send_notice(occurrences, settings, provider))
     tracker = UsageTracker(
         Limits.from_settings(settings), Pricing.from_settings(settings)
     )
@@ -589,6 +630,50 @@ def _semantic_stage(
             f"{skipped} image occurrence(s) were not verified (see partial reasons)."
         )
     return stage
+
+
+def send_notice(
+    occurrences: Sequence[ImageOccurrence], settings: Settings, provider: object
+) -> str:
+    """What this run will transmit to the model provider (shown before it does).
+
+    Counts come from the page HTML (no download has happened yet), so "up to":
+    cached verdicts, deterministic triage and unloadable images are not sent.
+    """
+    from urllib.parse import urlparse
+
+    unique = {(o.src or f"<no-src>{i}", o.alt) for i, o in enumerate(occurrences)}
+    remote_hosts: dict[str, int] = {}
+    for o in occurrences:
+        if o.src and is_remote_src(o.src):
+            host = urlparse(o.src if "//" in o.src else "//" + o.src).hostname
+            remote_hosts[host or "?"] = remote_hosts.get(host or "?", 0) + 1
+    endpoint = getattr(provider, "endpoint_host", None) or "the configured provider"
+    model = settings.vision_model or "default"
+    lines = [
+        f"Sending data to {endpoint} (model {model}): up to "
+        f"{len(unique)} unique image(s) from {len(occurrences)} <img> tag(s), "
+        f"in batches of {settings.batch_size}. Each image goes with its alt text "
+        "and a short HTML snippet around it (secret-like text is redacted). "
+        "Verdicts already in the cache are not sent again.",
+    ]
+    n_remote = sum(remote_hosts.values())
+    if n_remote and settings.remote_images:
+        shown = ", ".join(sorted(remote_hosts)[:5])
+        more = "..." if len(remote_hosts) > 5 else ""
+        lines.append(
+            f"Remote images: Bondy will DOWNLOAD {n_remote} http(s) image(s) from "
+            f"{shown}{more} and forward their bytes (use --no-remote-images to "
+            "keep them out)."
+        )
+    elif n_remote:
+        lines.append(
+            f"Remote images: {n_remote} http(s) image(s) will NOT be downloaded "
+            "(--no-remote-images); they go to manual review."
+        )
+    else:
+        lines.append("Remote images: none; only local image files are read.")
+    return " ".join(lines)
 
 
 def exit_code(report: ScanReport, fail_on: str) -> int:

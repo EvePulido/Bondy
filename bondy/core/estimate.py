@@ -10,7 +10,6 @@ per-image figure, and prices come from the user's configuration.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
-from pathlib import Path
 from typing import Any
 
 from bondy.config import Settings
@@ -22,7 +21,7 @@ from bondy.core.budget import (
 )
 from bondy.core.images import LoadedImage, is_remote_src, load_image
 from bondy.core.models import ImageOccurrence
-from bondy.core.pipeline import collect_images, project_root
+from bondy.core.pipeline import Target, collect_images, project_root
 from bondy.core.semantic import (
     estimate_request_tokens,
     make_batches,
@@ -89,7 +88,7 @@ def _make_loader(remote_images: bool):
     return loader
 
 
-def estimate_scan(target: Path | str, settings: Settings) -> Estimate:
+def estimate_scan(target: Target, settings: Settings) -> Estimate:
     """Counts pages/images/batches and prices them. No model, no network."""
     require_prices_for_limits(settings)
     est = Estimate(mode="no-llm" if settings.no_llm else "llm")

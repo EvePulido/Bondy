@@ -437,6 +437,7 @@ def prepare(
     max_images: int | None = None,
     store: Store | None = None,
     model: str = "",
+    progress: Callable[[str], None] | None = None,
 ) -> Prepared:
     """Deterministic triage + loading + cache lookup, de-duplicating by (image, alt).
 
@@ -458,7 +459,9 @@ def prepare(
         g.positions.append(pos)
 
     to_send: list[Group] = []
-    for g in groups.values():
+    for gi, g in enumerate(groups.values(), 1):
+        if progress:
+            progress(f"image {gi}/{len(groups)}: {g.occurrences[0].src or '(no src)'}")
         try:
             g.image = loader(g.occurrences[0])
         except ImageLoadError as e:
@@ -528,7 +531,7 @@ def analyze_images(
     """
     reasons: list[str] = []
     try:
-        prep = prepare(occurrences, loader, max_images, store, model)
+        prep = prepare(occurrences, loader, max_images, store, model, progress)
     except KeyboardInterrupt:
         return _unprocessed(occurrences, INTERRUPTED, reasons)
     if any(g.skipped for g in prep.pending):
@@ -551,7 +554,9 @@ def analyze_images(
                 g.skipped = stopped
             continue
         if progress:
-            progress(f"batch {bi}/{len(batches)}: {len(batch)} image(s)")
+            progress(
+                f"asking the model, batch {bi}/{len(batches)}: {len(batch)} image(s)"
+            )
         tracker.batches += 1
         try:
             failed = _run_batch(batch, provider, tracker, est_in, est_out)

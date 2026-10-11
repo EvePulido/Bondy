@@ -1,5 +1,10 @@
 """Bondy command line: ``bondy scan``, ``bondy estimate`` and ``bondy doctor``.
 
+``bondy scan`` takes one or more files/folders. Live progress and the notice of
+what is sent to the model provider go to **stderr** (stdout carries only the
+report); progress is shown on a TTY or with ``--progress`` and hidden by
+``--quiet``.
+
 Exit codes for ``scan``: 0 = nothing at/above ``--fail-on``; 1 = findings at or
 above the threshold; 2 = usage/config error or a scanner failed (incomplete);
 3 = PARTIAL result (a --max-* limit or the API quota stopped the scan) with
@@ -13,6 +18,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
@@ -26,10 +32,51 @@ from bondy.core.baseline import (
 )
 from bondy.core.formats import FORMATS, render
 from bondy.core.providers.base import ProviderError
+from bondy.core.redact import redact_secrets
 from bondy.core.report import build_report
 
 EXIT_USAGE = 2
 NL = "\n"
+
+
+_CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f]")
+_PROGRESS_MAX = 200
+
+
+def _line_safe(text: str) -> str:
+    """One terminal-safe line: control characters out, secrets redacted."""
+    text = _CONTROL.sub("?", redact_secrets(str(text)))
+    return text if len(text) <= _PROGRESS_MAX else text[: _PROGRESS_MAX - 3] + "..."
+
+
+def _stderr_sink(prefix: str):
+    def sink(message: str) -> None:
+        print(f"{prefix}{_line_safe(message)}", file=sys.stderr, flush=True)
+
+    return sink
+
+
+def _resolve_targets(raw: list[str]) -> list[Path]:
+    """Existing, de-duplicated paths in the order given.
+
+    Raises ``FileNotFoundError`` naming EVERY missing path at once.
+    """
+    missing = [p for p in raw if not Path(p).exists()]
+    if missing:
+        shown = ", ".join(f'"{p}"' for p in missing)
+        raise FileNotFoundError(
+            f"Path not found: {shown}"
+            if len(missing) == 1
+            else f"{len(missing)} paths not found: {shown}"
+        )
+    seen: set[str] = set()
+    out: list[Path] = []
+    for p in raw:
+        key = os.path.normcase(str(Path(p).resolve()))
+        if key not in seen:
+            seen.add(key)
+            out.append(Path(p))
+    return out
 
 
 def _version() -> str:
@@ -128,8 +175,26 @@ def build_parser() -> argparse.ArgumentParser:
         help="scan an HTML file or a folder",
         description="Scan HTML for WCAG issues.",
     )
-    scan.add_argument("path", help="HTML file or folder to scan")
+    scan.add_argument(
+        "path",
+        nargs="+",
+        metavar="PATH",
+        help="HTML file(s) or folder(s) to scan; duplicates are scanned once. "
+        "With several paths, report paths are relative to their common folder",
+    )
     _add_shared_options(scan)
+    scan.add_argument(
+        "-q",
+        "--quiet",
+        action="store_true",
+        help="no live progress on stderr (the report and the notice of what is "
+        "sent to the model are unaffected)",
+    )
+    scan.add_argument(
+        "--progress",
+        action="store_true",
+        help="show live progress on stderr even when it is not a terminal",
+    )
     scan.add_argument(
         "--static",
         action="store_true",
@@ -267,11 +332,11 @@ def _flags(args: argparse.Namespace) -> dict:
     return {name: getattr(args, name, None) for name in _FLAG_NAMES}
 
 
-def _print_estimate(args: argparse.Namespace, settings) -> int:
+def _print_estimate(targets, settings) -> int:
     from bondy.core.estimate import estimate_scan, format_estimate
 
     try:
-        est = estimate_scan(Path(args.path), settings)
+        est = estimate_scan(targets, settings)
     except (FileNotFoundError, ConfigError) as e:
         print(f"bondy: {e}", file=sys.stderr)
         return EXIT_USAGE
@@ -288,7 +353,7 @@ def _cmd_estimate(args: argparse.Namespace) -> int:
     except ConfigError as e:
         print(f"bondy: config error: {e}", file=sys.stderr)
         return EXIT_USAGE
-    return _print_estimate(args, settings)
+    return _print_estimate(Path(args.path), settings)
 
 
 def _cmd_scan(args: argparse.Namespace) -> int:
@@ -301,8 +366,15 @@ def _cmd_scan(args: argparse.Namespace) -> int:
         print(f"bondy: config error: {e}", file=sys.stderr)
         return EXIT_USAGE
 
+    try:
+        targets = _resolve_targets(args.path)
+        root = project_root(targets)
+    except (FileNotFoundError, ConfigError) as e:
+        print(f"bondy: {e}", file=sys.stderr)
+        return EXIT_USAGE
+
     if args.dry_run:
-        return _print_estimate(args, settings)
+        return _print_estimate(targets, settings)
 
     baseline = None
     if settings.baseline:  # validated before anything is scanned or spent
@@ -313,9 +385,12 @@ def _cmd_scan(args: argparse.Namespace) -> int:
             return EXIT_USAGE
 
     try:
+        show_progress = not args.quiet and (args.progress or sys.stderr.isatty())
         report = run_scan(
-            Path(args.path),
+            targets,
             settings,
+            progress=_stderr_sink("bondy: ") if show_progress else None,
+            notify=_stderr_sink("bondy: NOTICE: "),
             changed_only=args.changed_only,
             resume=args.resume,
             since=args.since,
@@ -338,7 +413,7 @@ def _cmd_scan(args: argparse.Namespace) -> int:
 
     model = build_report(
         report,
-        project_root(Path(args.path)),
+        root,
         version=_version(),
         baseline=baseline,
         ignore_rules=settings.ignore,
@@ -425,9 +500,7 @@ def _cmd_baseline(args: argparse.Namespace) -> int:
         return 3
     items = model.new_items
     try:
-        write_baseline(
-            Path(args.output), build_document(items, _version())
-        )
+        write_baseline(Path(args.output), build_document(items, _version()))
     except OSError as e:
         print(f"bondy: cannot write {args.output}: {e}", file=sys.stderr)
         return EXIT_USAGE

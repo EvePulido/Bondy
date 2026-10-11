@@ -36,6 +36,11 @@ QUOTA_MESSAGE = (
     "quota reset, use a billing-enabled key or Vertex AI, or run without an API "
     "key (deterministic checks only)."
 )
+QUOTA_PARTIAL_NOTE = (
+    "Partial result: the daily Gemini quota was exhausted, so only the "
+    "deterministic findings are shown (no AI image verification). Run the audit "
+    "again after the quota resets to complete it."
+)
 KEY_REJECTED_MESSAGE = (
     "The API key was rejected by the API (invalid, expired or without permission). "
     "Recovery: check GEMINI_API_KEY / GOOGLE_API_KEY "
@@ -161,7 +166,7 @@ def run_web_audit(
     """Scans a pasted HTML string or a demo file and returns ``scan_to_payload``.
 
     The caller has already validated ``source``/``raw_html`` with
-    ``validate_input_before_audit``. Raises ``WebAuditError`` (429 daily quota,
+    ``validate_input_before_audit``. Raises ``WebAuditError`` (429 daily quota with nothing to show,
     403 invalid selection, 500 anything else). Without an API key (or with
     ``no_llm``) only the deterministic checks run and ``notes`` says so.
     """
@@ -216,6 +221,15 @@ def _finish(
             r.skipped or "; ".join(r.errors) or "could not be read" for r in scan.files
         ] or ["no HTML to scan"]
         raise WebAuditError(500, "The page could not be scanned: " + "; ".join(reasons))
+    payload, patch_ids = scan_to_payload(
+        scan, root, source_type=source_type, file_path=file_path
+    )
     if any(QUOTA_DAILY_MARKER in r for r in scan.usage.partial_reasons):
-        raise WebAuditError(429, QUOTA_MESSAGE)
-    return scan_to_payload(scan, root, source_type=source_type, file_path=file_path)
+        if not payload["data"]:
+            # nothing to show: the quota error is the whole answer
+            raise WebAuditError(429, QUOTA_MESSAGE)
+        # The deterministic scanners did produce findings: return them (200)
+        # as a partial result instead of throwing the work away.
+        payload["partial"] = True
+        payload["notes"].append(QUOTA_PARTIAL_NOTE)
+    return payload, patch_ids

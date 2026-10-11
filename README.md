@@ -188,7 +188,11 @@ bondy doctor                              # checks Python, Chromium, axe-core, c
 bondy doctor --check-key                  # + validates the key with 1 minimal request
 bondy scan ./my-site --no-llm             # deterministic scanners on a file or folder
 bondy scan page.html --format json --fail-on warning
+bondy scan index.html about.html docs/   # several files/folders; duplicates are scanned once
+bondy scan ./my-site --progress           # live progress on stderr (default: only on a terminal; --quiet hides it)
 ```
+
+`bondy scan` accepts several paths (what the pre-commit hook uses): every missing path is reported at once with exit code 2, and report paths are relative to the common folder of all of them (scan a folder if you need stable paths for baselines or SARIF). Progress (page, image and request batch) and the notice of what is sent to the model go to **stderr**, so `--format json` on stdout stays clean. In LLM mode, before the first download or request, Bondy prints a `NOTICE` with the provider host, the model, how many images (with their alt text and a short HTML snippet) it may send and whether http(s) images will be downloaded; `--quiet` does not hide it. `--mode agent` (the ADK agent) is not available in the CLI yet (pending in `docs/improvement-plan.md`, P4).
 
 `bondy scan` runs axe-core, contrast, keyboard focus (trap/order), `lang`, form labels and accessible-name checks. Without `--no-llm` and **with an API key** (`GEMINI_API_KEY` or `GOOGLE_API_KEY`) it also runs a semantic stage on `<img>` elements: code triages first (decorative signals, redundant "image of" prefixes, images that cannot be loaded) and only the rest goes to Gemini, **several images per request** (`--batch-size`, default 8), with one fused call that judges the alt text and the decorative/informative/functional class. The final keep/fix/manual-review decision is made in code. Without a key it falls back to `--no-llm` and says so.
 
@@ -255,7 +259,7 @@ The comment applies to the next element (a comment before `<html>` applies to pa
 
 **Summary and next step.** Every run ends with new findings by severity, how many were hidden by the baseline or suppressed, pages scanned/reused/skipped, the model usage and a concrete next step; the JSON has the same numbers under `summary`.
 
-**CI.** `action.yml` is a composite GitHub Action (inputs `path`, `fail-on`, `format`, `baseline`, `changed-only`, `since`, `gemini-api-key`, ...) that installs Bondy, scans and uploads the SARIF with `github/codeql-action/upload-sarif` pinned to a commit. `.pre-commit-hooks.yaml` defines a `bondy` hook that scans only the HTML changed against `HEAD`, offline and without writing a cache. A ready-to-copy, inactive workflow is in `docs/ci-example.yml`.
+**CI.** `action.yml` is a composite GitHub Action (inputs `path`, `fail-on`, `format`, `baseline`, `changed-only`, `since`, `gemini-api-key`, ...) that installs Bondy, scans and uploads the SARIF with `github/codeql-action/upload-sarif` pinned to a commit. `.pre-commit-hooks.yaml` defines a `bondy` hook that scans the HTML files pre-commit passes it (`bondy scan --no-llm --no-cache <files>`), offline and without writing a cache. The action pins its third-party actions to full commit SHAs verified with `git ls-remote`; the `owner/repo@tag` coordinate of Bondy itself and the hook's `repo:` URL are still placeholders until Bondy is published. A ready-to-copy, inactive workflow is in `docs/ci-example.yml`.
 
 ### 3. Run the API and Web UI Locally
 Launch the built-in FastAPI server to access the Bondy Web UI:
@@ -278,6 +282,8 @@ Bondy can be fully deployed to your own Google Cloud environment (Cloud Run) usi
      ```bash
      agents-cli deploy
      ```
+
+**Docker image.** The `Dockerfile` installs the `server`, `agent` and `gcp` extras from `uv.lock` and starts `uvicorn` from the project virtualenv. By default it does **not** install Chromium (about 400 MB less): the web app then runs in *static mode* (HTML-parsing checks only, said in `notes`). Build with `--build-arg INSTALL_CHROMIUM=true` for the full deterministic scan (axe-core, contrast, focus). Set `BONDY_NO_LLM=1` to keep the container from calling a model. The image build itself has not been verified in CI yet.
 
 ### 5. Auditing Local Files (Usage)
 Bondy supports auditing local files seamlessly. To scan a local project:

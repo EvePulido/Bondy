@@ -116,8 +116,10 @@ runs:
         PY
         )
         [ -n "$prefix" ] && args+=(--sarif-prefix "$prefix")
-        bondy "${args[@]}"
-        code=$?
+        # GitHub runs `bash -e`: a bare `bondy ...; code=$?` would abort the
+        # script on exit 1 before the code is recorded.
+        code=0
+        bondy "${args[@]}" || code=$?
         echo "exit-code=$code" >> "$GITHUB_OUTPUT"
         # Do not fail here: the SARIF must be uploaded first (next steps).
         exit 0

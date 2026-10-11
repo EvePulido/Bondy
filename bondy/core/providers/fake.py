@@ -56,6 +56,8 @@ class FakeProvider(RetryingProvider):
     requested waits are recorded in ``sleeps``.
     """
 
+    endpoint_host = "fake-provider.invalid"
+
     def __init__(
         self,
         script: Sequence[Step] = (),

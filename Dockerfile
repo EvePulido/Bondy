@@ -25,6 +25,19 @@ COPY ./demo_sites ./demo_sites
 
 RUN uv sync --frozen --extra server --extra agent --extra gcp
 
+# Run from the project virtualenv: `uv run` at start-up would re-resolve and
+# could need network access in a locked-down Cloud Run revision.
+ENV PATH="/code/.venv/bin:${PATH}"
+
+# Browser for axe-core / contrast / focus checks. Off by default to keep the
+# image small (~400 MB less): without it Bondy runs in STATIC MODE (HTML-parsing
+# checks only; the response says so in `notes`). Build with
+# `--build-arg INSTALL_CHROMIUM=true` for the full deterministic scan.
+ARG INSTALL_CHROMIUM=false
+RUN if [ "$INSTALL_CHROMIUM" = "true" ]; then \
+        playwright install --with-deps chromium; \
+    fi
+
 ARG COMMIT_SHA=""
 ENV COMMIT_SHA=${COMMIT_SHA}
 
@@ -36,4 +49,4 @@ ENV AGENT_VERSION=${AGENT_VERSION}
 
 EXPOSE 8080
 
-CMD ["uv", "run", "uvicorn", "bondy.fast_api_app:app", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["uvicorn", "bondy.fast_api_app:app", "--host", "0.0.0.0", "--port", "8080"]

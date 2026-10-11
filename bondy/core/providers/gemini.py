@@ -23,6 +23,9 @@ REQUEST_TIMEOUT_MS = 60_000
 
 
 class GeminiProvider(RetryingProvider):
+    # Host the requests go to (``vertexai=False``: the AI Studio endpoint).
+    endpoint_host = "generativelanguage.googleapis.com"
+
     def __init__(
         self,
         api_key: str,

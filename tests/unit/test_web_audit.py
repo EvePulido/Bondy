@@ -328,7 +328,22 @@ def test_audit_local_demo_with_provider_gives_patchable_fix(
     assert advice and all("before_occurrences" not in d for d in advice)
 
 
-def test_audit_daily_quota_is_429(client, monkeypatch, demo_site):
+def test_audit_daily_quota_with_deterministic_findings_is_200_partial(
+    client, monkeypatch, demo_site
+):
+    _use_scanners(monkeypatch, _stub([F_LANG]))
+    provider = FakeProvider([Exception(RATE_LIMIT_DAY)] * 2)
+    monkeypatch.setattr(fast_api_app, "_audit_provider", lambda: provider)
+    r = client.post("/api/audit", json={"source": demo_site})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["partial"] is True
+    assert body["data"], "deterministic findings must be returned"
+    assert any("daily Gemini quota" in n for n in body["notes"])
+    assert provider.http_requests <= 2
+
+
+def test_audit_daily_quota_without_findings_is_429(client, monkeypatch, demo_site):
     _use_scanners(monkeypatch, _stub([]))
     provider = FakeProvider([Exception(RATE_LIMIT_DAY)] * 2)
     monkeypatch.setattr(fast_api_app, "_audit_provider", lambda: provider)

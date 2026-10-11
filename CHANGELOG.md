@@ -58,10 +58,15 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 - `/api/audit` anade a la respuesta `notes`, `mode` y `partial` (retrocompatible); `stats` sale del `axe` del propio pipeline (`FileResult.axe_stats`), sin segunda ejecucion.
 - `GET /api/checks` y `bondy.core.checks` (`GROUPS`, `resolve_criteria`, `describe_checks`): unica fuente del mapeo checks -> WCAG. `enabled_checks` acepta ids de grupo (`images`, `forms`, `keyboard`, `contrast`), ids de check con WCAG y criterios (`WCAG 1.1.1`); un valor desconocido es 403.
 - `tests/unit/test_web_audit.py` (FakeProvider, sin red ni cuota).
+- `bondy scan` acepta varias rutas (`bondy scan a.html b.html carpeta/`): se deduplican (también un archivo dentro de una carpeta dada), una ruta inexistente aborta con exit 2 nombrando todas las que faltan y las rutas del reporte son relativas a su carpeta común (`project_root` y `discover` aceptan secuencias; sin carpeta común, p. ej. otras unidades, es un error claro).
+- Progreso en vivo en **stderr** (`page i/n`, `image i/n`, `asking the model, batch i/n`): solo en terminal salvo `--progress`, desactivable con `-q/--quiet`; el stdout (reporte/JSON) no cambia. Las líneas se sanean (caracteres de control, secretos redactados, 200 caracteres).
+- Aviso en tiempo de ejecución (solo modo LLM, stderr, antes de la primera descarga/petición): host del proveedor, modelo, nº de imágenes únicas y de `<img>`, tamaño de lote y si se descargan imágenes http(s) (con sus hosts) o van a revisión manual. `--quiet` no lo oculta. `GeminiProvider.endpoint_host`, `run_scan(..., notify=)` y `bondy.core.pipeline.send_notice`.
+- `.dockerignore` (excluye `.venv`, `.git`, caches, `.env`, tests y docs del contexto de build) y `ARG INSTALL_CHROMIUM` en el `Dockerfile`.
+- Tests `test_cli_multi_progress.py` (varias rutas, errores, progreso, aviso con `FakeProvider`) y `test_action_records_the_exit_code_under_bash_e`.
 
 ### Changed
 - `web/app.js` ya no mapea checks -> WCAG: envia los ids de grupo y muestra las `notes` del servidor; las reglas sin criterio WCAG se etiquetan "Best practice".
-- `/api/audit`: "Apply to File" solo se ofrece para parches reales (fixes de imagen); los hallazgos que solo traen una recomendacion no llevan `before_occurrences`. Una cuota diaria agotada sigue siendo 429; una key rechazada, 500 con mensaje accionable.
+- `/api/audit`: "Apply to File" solo se ofrece para parches reales (fixes de imagen); los hallazgos que solo traen una recomendacion no llevan `before_occurrences`. Una cuota diaria agotada es 429 solo si no hay hallazgos deterministas (si los hay: 200 parcial); una key rechazada, 500 con mensaje accionable.
 - JSON de `scan`: los hallazgos son ahora uno por elemento afectado (`selector`, `snippet`, `line`, `fix`, `fingerprint`; ya no hay `nodes`/`count`), con rutas relativas a la carpeta escaneada y `/`; nuevas claves `summary`, `baseline`, `suppressions`, `suppressed`.
 - `bondy scan` calcula el exit code sobre los hallazgos nuevos (no baselined ni suprimidos); la lógica de los códigos 0/1/2/3 no cambia.
 - `bondy/scan.py`: `load_page`/`scan_loaded` separan lectura y escaneo; el HTML se lee una sola vez y se hashea (`FileResult.html`, `sha256`, `reused`).
@@ -95,6 +100,10 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 - `.gitignore`: se quita `Bondy/`, que por ser insensible a mayúsculas ignoraba también el paquete `bondy/`.
 - `render_page.py` ya no permite hosts http(s) remotos: la captura de visión es solo local (`file://` del archivo y `demo_sites/`).
 - `bondy scan --static` (o `BONDY_STATIC=1` / `static = true`): fuerza el modo estático sin lanzar navegador, útil en CI.
+- `Dockerfile`: arranca `uvicorn` desde `/code/.venv` (sin `uv run` en el arranque, que re-resolvía dependencias) y Chromium es opcional (`--build-arg INSTALL_CHROMIUM=true`); sin él la imagen corre en modo estático y lo dice en `notes`. No se pudo construir en este entorno (daemon de Docker apagado).
+- `.pre-commit-hooks.yaml`: el hook usa `pass_filenames: true` y `bondy scan --no-llm --no-cache <archivos>` (antes `scan . --since HEAD`); funciona con `pre-commit run --all-files` y no necesita un commit previo.
+- `.github/workflows/bondy-audit.yml`: `permissions: contents: read` y `uv sync --all-extras --frozen`.
+- `FakeProvider` expone `endpoint_host`; `semantic.prepare` y `scan_loaded` aceptan callbacks de progreso (`progress`, `on_page`).
 
 ### Fixed
 - `pyproject.toml`: eliminado el paquete inexistente `frontend` de hatch.
@@ -103,10 +112,14 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 - `fast_api_app.py`: ya no se oculta el error de formato JSON bajo "timed out".
 - Una página con `Content-Security-Policy` estricta ya no hace fallar a axe (`bypass_csp` en el contexto del navegador; la guardia de red sigue activa).
 - El reporte HTML de Bondy escrito dentro de la carpeta escaneada se omite en el siguiente escaneo (marca `<meta name="generator" content="bondy-report">`) en lugar de auditarse y salir con código 2.
+- `focus-order`: un elemento invisible con foco ya no se repite una vez por vuelta del Tab. El validador identifica cada elemento por identidad (no por selector), se detiene al cerrar el ciclo o cuando no queda nada enfocable (tope 60 Tab) y devuelve `invisible` con el HTML del elemento; el hallazgo trae `nodes` y se ubica en el elemento en lugar de `(whole page)`. Test `tests/unit/test_focus_order.py`.
+- `POST /api/audit`: con la cuota diaria agotada y hallazgos deterministas ya calculados responde 200 con esos hallazgos, `partial: true` y una nota (`QUOTA_PARTIAL_NOTE`); solo responde 429 si no hay nada que mostrar.
+- `action.yml`: con `bash -e` (shell por defecto de GitHub), `bondy ...; code=$?` abortaba el paso con exit 1 sin registrar `exit-code` ni dejar subir el SARIF; ahora `code=0; bondy ... || code=$?`.
 
 ### Removed
 - Modelos sin uso en `agent.py`: `Evidence`, `Finding`, `FixSuggestion`, `FindingsReport`, `FixesReport`.
 - `bondy/fast_api_app.py`: `InMemoryRunner`/agente ADK en `/api/audit`, `_build_fallback_app`, `FALLBACK_MODEL`, `_skip_note`, `_compute_axe_stats` y el bucle de reintentos propio (ahora los cubre la politica unica de `bondy/core/providers`). `bondy/agent.py` y el modo agente no cambian.
+- Código muerto de la migración a `bondy/core`: `bondy/app_utils/audit_schema.py` (`AuditFix`, `parse_audit_response`; nada fuera de sus tests lo importaba), `tests/unit/test_audit_schema.py` y `bondy.resources.AXE_SCAN_SCRIPT`. `docs/architecture.md` apunta ahora a `web_audit.py` para el contrato de `/api/audit`.
 
 ### Pendiente
 

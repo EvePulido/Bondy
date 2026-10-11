@@ -406,8 +406,20 @@ Dejados para después por decisión del usuario:
 | # | Pendiente | Nota |
 |---|---|---|
 | P1 | ~~**UI web y `/api/audit` sobre `bondy/core`**~~ | **Hecho (2026-10-10)**: `bondy/core/web_audit.py` (adaptador + `run_web_audit`), `GET /api/checks`, mapeo solo en `checks.py`, `app.js` sin mapeo propio. Sin verificar: UI en un navegador real y Gemini real (P2). |
-| P2 | Verificar con **Gemini real** (esquema anidado, timeout en ms, tope ~20 MB, textos de error de key, calidad del alt funcional) | Necesita key de pago o cuota nueva. |
-| P3 | Verificar **Docker** y **CI de GitHub** con el árbol nuevo; ejecutar la action y el hook en un repo real | Fijar `owner/repo@tag` de la action y URL del hook. |
-| P4 | `bondy scan` con varias rutas, progreso en vivo, aviso en ejecución de qué se envía, `--mode agent` en la CLI | Mejoras de uso. |
+| P2 | **Parcialmente verificado el 2026-10-10 con key nueva** (`doctor --check-key` OK; `scan demo_sites/site_1_bad_alt`: 1 lote, esquema anidado aceptado, imágenes remotas descargadas, 3197 tokens de entrada vs ~3104-6208 estimados, 2 peticiones). Falta: timeout en ms, tope ~20 MB, textos de error de key inválida, calidad del alt funcional. Original: Verificar con **Gemini real** (esquema anidado, timeout en ms, tope ~20 MB, textos de error de key, calidad del alt funcional) | Necesita key de pago o cuota nueva. |
+| P3 | ~~Verificar **Docker** y **CI de GitHub**~~ | **Parcial (2026-10-10)**: validado sin nube: YAML de `action.yml`, `bondy-audit.yml`, hook y ejemplo; SHAs de las acciones comprobados con `git ls-remote` (los `^{}` son los commits); la parte `bash -e` de la action tenia un bug (corregido); `bondy scan demo_sites --format sarif/markdown --no-llm` y `uvicorn` con `BONDY_NO_LLM=1` (`GET /`, `POST /api/audit`) funcionan en local. **Sin verificar**: `docker build`/`run` (el daemon de Docker Desktop estaba apagado), la action y el hook en un repo/runner real. Pendiente fijar `owner/repo@tag` de la action y la URL `repo:` del hook (siguen como TODO; no existen aun). |
+| P4 | ~~`bondy scan` con varias rutas, progreso en vivo, aviso en ejecucion~~ / **`--mode agent` en la CLI** | **Hecho (2026-10-10)**: varias rutas, progreso por pagina/imagen/lote en stderr (`--quiet`, `--progress`) y aviso de lo que se envia (solo LLM). **Pendiente**: `--mode agent` en la CLI (el agente ADK solo corre desde la app web). |
 | P5 | Fase C restante, Fase F (formato de archivos viejos, `ty` en CI, matriz Windows/macOS/Linux), E7 plantillas, B8 Batch API, `demo_sites` -> `examples/` | Ver secciones 4 y 5. |
 | P6 | Watchdog duro por página | Descartado por ahora; mitigación `--scan-timeout` + `--resume`. |
+
+### Hallazgos y cierres (2026-10-10, tras P1)
+
+| Hallazgo | Resolucion |
+|---|---|
+| `focus-order`: un `<a>` vacio daba N hallazgos identicos "(whole page)" | **Corregido**: el validador recorria 20 Tab sin detectar la vuelta y deduplicaba por selector. Ahora identifica cada elemento por identidad, se detiene al cerrar el ciclo y el hallazgo trae el HTML del elemento. Test `test_focus_order.py`. |
+| `AXE_SCAN_SCRIPT` y `audit_schema.parse_audit_response` sin uso | **Eliminados** (grep: nada del agente, MCP, skills ni tests, salvo su propio test, los usaba). |
+| Cuota diaria agotada con hallazgos deterministas | **Decidido**: `/api/audit` responde 200 `partial: true` con una nota; 429 solo si no hay nada que mostrar. |
+| Imagen Docker sin Chromium por defecto | **Decidido**: `INSTALL_CHROMIUM=false` (modo estático, documentado); activable con `--build-arg`. |
+| `ruff format --check`: 14 archivos del repo no pasan `ruff format --check` | Ya existian (CRLF/estilo); se trata con la Fase F (formato de archivos viejos). |
+| Reporte con varias rutas usa la carpeta comun como raiz | Documentado: para baselines/SARIF estables escanear una carpeta. |
+| `upload-sarif` falla en PRs desde forks (token sin `security-events: write`) | Pendiente: documentar o condicionar el paso en la action. |
