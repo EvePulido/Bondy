@@ -76,6 +76,8 @@ def check_form_labels(html_str: str) -> list:
                 "input_type": input_type if tag_name == "input" else tag_name,
                 "has_label": has_label,
                 "detected_method": method,
+                # start tag as written in the source (see accessible_name.py)
+                "html": match.group(0)[:300],
             }
         )
 

@@ -62,6 +62,7 @@ def test_summary_counts_are_consistent():
         "new": {"critical": 1, "warning": 0, "total": 1},
         "baselined": 1,
         "suppressed": 0,
+        "duplicates_merged": 0,
     }
     assert s["pages"]["total"] == 1 and s["partial"] is False
 

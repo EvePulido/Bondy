@@ -5,6 +5,9 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- Fusion de duplicados entre escaneres (`bondy/core/dedupe.py`, llamada desde `build_report`): el mismo problema sobre el mismo elemento (p. ej. `<a href="/search"><img></a>` sin nombre: axe `link-name` + `axe-tree` + `accessible-name`; axe `color-contrast` + `contrast`) se informa una sola vez, con la mejor evidencia (axe, luego `accessible-name`/`labels`, luego `axe-tree`/`contrast`), peor severidad y union de criterios WCAG. El detalle queda en `merged_from` (JSON, SARIF `properties.mergedFrom`, Markdown/HTML "Also reported by") y el resumen indica `duplicates_merged` (`findings.duplicates_merged`; linea "Duplicates merged" en terminal). Demo_sites: 59 -> 36 hallazgos; caso minimo propio: 19 -> 9. No se fusionan problemas de otra naturaleza (contraste vs nombre, `alt` de la imagen vs nombre del enlace, `focus-order`, `region`...). Tests `tests/unit/test_dedupe.py`.
+- `accessible-name` y `labels` informan el HTML del elemento (`nodes[].html`), asi que ahora tienen `line` y `bondy-ignore` los localiza con precision; su huella no cambia (selector primero).
+- La CLI lee la API key del `.env` del proyecto (solo `GEMINI_API_KEY`/`GOOGLE_API_KEY`; busca desde el directorio actual hasta la raíz del proyecto `.git`/`bondy.toml`, sin exportar nada ni subir a carpetas superiores). Precedencia flag > entorno > `.env`; `bondy doctor` indica dónde la encontró sin mostrar el valor. Tests en `tests/unit/test_dotenv_key.py`.
 - `bondy/app_utils/browser.py`: lanzador único de navegador (Chromium de Playwright -> Chrome -> Edge del sistema, con error accionable) y `open_page()`, que aborta toda petición salvo `file://` del propio archivo, `data:` y `about:` (y deshabilita descargas, service workers y WebSockets).
 - Modo estático: sin navegador utilizable `bondy scan` no falla; ejecuta lang/labels/accessible-name/img-alt por HTML, indica qué checks omitió en `notes` (`static_mode`, `omitted_checks` en JSON) y mantiene los códigos de salida 0/1.
 - `bondy doctor` lanza el navegador y reporta cuál se usará (o avisa del modo estático con el comando de instalación).
@@ -65,6 +68,7 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 - Tests `test_cli_multi_progress.py` (varias rutas, errores, progreso, aviso con `FakeProvider`) y `test_action_records_the_exit_code_under_bash_e`.
 
 ### Changed
+- Cambio de salida de `bondy scan`: un mismo problema ya no aparece 2-3 veces (ver `dedupe`), asi que los totales bajan y `--fail-on` se calcula sobre los hallazgos fusionados. Baselines existentes: siguen valiendo sin migrar (el ganador conserva su huella y el baseline tambien casa por las huellas de los fusionados); `bondy baseline create` genera ahora un archivo mas corto. Un `bondy-ignore` por `accessible-name`/`axe-tree`/`labels`/`contrast` sigue suprimiendo el elemento aunque lo muestre otra regla. Las paginas guardadas en `.bondy/cache` por versiones anteriores se descartan (`FINDINGS_SCHEMA`).
 - `web/app.js` ya no mapea checks -> WCAG: envia los ids de grupo y muestra las `notes` del servidor; las reglas sin criterio WCAG se etiquetan "Best practice".
 - `/api/audit`: "Apply to File" solo se ofrece para parches reales (fixes de imagen); los hallazgos que solo traen una recomendacion no llevan `before_occurrences`. Una cuota diaria agotada es 429 solo si no hay hallazgos deterministas (si los hay: 200 parcial); una key rechazada, 500 con mensaje accionable.
 - JSON de `scan`: los hallazgos son ahora uno por elemento afectado (`selector`, `snippet`, `line`, `fix`, `fingerprint`; ya no hay `nodes`/`count`), con rutas relativas a la carpeta escaneada y `/`; nuevas claves `summary`, `baseline`, `suppressions`, `suppressed`.
@@ -139,7 +143,7 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 - [ ] Tests de `security.py` (traversal, rutas absolutas, `..`).
 - [ ] Golden files de hallazgos esperados por demo site y dataset de evaluación (`tests/eval/`) en CI opcional.
 - [ ] `ruff format --check` en el CI y reducir `--all-extras`.
-- [ ] Evitar duplicados entre axe y `text-contrast-calculator` (comprobar en una corrida real).
+- [x] Evitar duplicados entre axe y `text-contrast-calculator` (comprobar en una corrida real). Fusionados por `bondy/core/dedupe.py` cuando ambos apuntan al mismo elemento (selector unico o HTML).
 
 **Deuda técnica**
 - [ ] `ALLOWED_SOURCES` sin uso en `security.py` (usar `Path.resolve()` + `is_relative_to()`).

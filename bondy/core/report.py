@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from bondy.core.checks import CHECKS
+from bondy.core.dedupe import dedupe_items
 from bondy.core.models import ScanReport, UsageSummary
 from bondy.core.redact import redact_secrets
 from bondy.core.source import PageIndex
@@ -62,6 +63,17 @@ class Item:
     status: str = "new"  # new | baselined | suppressed
     suppressed_by: dict[str, Any] | None = None
     details: dict[str, Any] = field(default_factory=dict)  # alt-text specifics
+    # duplicates of this problem found by other scanners and merged into it:
+    # [{"scanner", "rule", "message", "fingerprint"}] (see bondy.core.dedupe)
+    merged_from: list[dict[str, Any]] = field(default_factory=list)
+
+    def all_fingerprints(self) -> list[str]:
+        """Own fingerprint plus the ones of the findings merged into it."""
+        return [self.fingerprint, *(m["fingerprint"] for m in self.merged_from)]
+
+    def all_rules(self) -> list[str]:
+        """Own rule plus the rules of the findings merged into it."""
+        return [self.rule, *(m["rule"] for m in self.merged_from)]
 
 
 @dataclass
@@ -109,6 +121,7 @@ class Report:
     suppressions: list[Suppression] = field(default_factory=list)
     baseline: BaselineInfo | None = None
     static_mode: bool = False
+    duplicates_merged: int = 0  # findings absorbed into another (dedupe)
 
     # ----- views -----
     @property
@@ -149,6 +162,7 @@ class Report:
                 "new": {**self.count_by_severity(), "total": len(new)},
                 "baselined": len(self.baselined_items),
                 "suppressed": len(self.suppressed_items),
+                "duplicates_merged": self.duplicates_merged,
             },
             "baseline": asdict(self.baseline) if self.baseline else None,
             "suppressions": {"applied": len(applied), "obsolete": len(obsolete)},
@@ -358,6 +372,7 @@ def build_report(
     items: list[Item] = []
     notes = [redact_secrets(scrub(n)) for n in scan.notes]
     seen: dict[tuple[str, str, str], int] = {}
+    indexes: dict[str, PageIndex] = {}
 
     for r in scan.files:
         rel = relative_path(r.path, root)
@@ -371,6 +386,8 @@ def build_report(
             )
         )
         index = PageIndex(r.html) if r.html else None
+        if index is not None:
+            indexes[rel] = index
         for finding in r.findings:
             if finding.get("count", 0) > len(finding.get("nodes") or []) > 0:
                 notes.append(
@@ -401,6 +418,11 @@ def build_report(
                 d[k] = redact_secrets(d[k])
         fixes.append(d)
 
+    # Same problem on the same element reported by several scanners: one item.
+    # Before suppressions and baseline, so both act on the merged item (they
+    # also see the rules/fingerprints of what was merged into it).
+    items, merged = dedupe_items(items, indexes)
+
     report = Report(
         version=version,
         mode=scan.usage.mode,
@@ -410,6 +432,7 @@ def build_report(
         notes=notes,
         usage=scan.usage,
         static_mode=any(r.omitted for r in scan.files),
+        duplicates_merged=merged,
     )
     if ignore_rules or any(
         r.html and "bondy-ignore" in r.html.lower() for r in scan.files

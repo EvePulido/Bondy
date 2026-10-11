@@ -110,7 +110,9 @@ def check_inline_syntax(pages: dict[str, str]) -> None:
 def _token_matches(token: str, item: Item) -> bool:
     if re.fullmatch(r"\d\.\d\.\d{1,2}", token):
         return token in {c.removeprefix("WCAG").strip() for c in item.wcag}
-    return token == item.rule.lower()
+    # a finding merged into this one (same problem, other scanner) counts too:
+    # `bondy-ignore: accessible-name` keeps silencing it after the merge
+    return token in {r.lower() for r in item.all_rules()}
 
 
 def apply_suppressions(

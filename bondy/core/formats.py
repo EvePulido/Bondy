@@ -121,6 +121,11 @@ def render_summary(report: Report) -> list[str]:
         f" ({sm['suppressions']['applied']} rule(s) applied, "
         f"{sm['suppressions']['obsolete']} obsolete)"
     )
+    if report.duplicates_merged:
+        lines.append(
+            f"  Duplicates merged: {report.duplicates_merged} (same problem "
+            "reported by several scanners; see merged_from in --format json)"
+        )
     lines.append(
         f"  Pages: {pages['scanned']} scanned, {pages['reused']} reused from the "
         f"previous scan, {pages['skipped']} skipped"
@@ -205,6 +210,8 @@ def _item_dict(i: Item) -> dict[str, Any]:
         "fingerprint": i.fingerprint,
     }
     d.update(i.details)
+    if i.merged_from:
+        d["merged_from"] = i.merged_from
     return d
 
 
@@ -286,6 +293,7 @@ def render_markdown(report: Report, exit_code: int) -> str:
     out += [
         f"- Suppressed by ignore rules: {sm['findings']['suppressed']}",
         f"- Hidden by the baseline: {sm['findings']['baselined']}",
+        f"- Duplicates merged: {report.duplicates_merged}",
         f"- Pages: {sm['pages']['scanned']} scanned, {sm['pages']['reused']} "
         f"reused, {sm['pages']['skipped']} skipped",
         "",
@@ -342,6 +350,9 @@ def render_markdown(report: Report, exit_code: int) -> str:
                 out.append(f"- Snippet: {md_code(i.snippet)}")
             if i.fix:
                 out.append(f"- Suggested fix: {md_text(i.fix)}")
+            if i.merged_from:
+                also = ", ".join(sorted({m["rule"] for m in i.merged_from}))
+                out.append(f"- Also reported by: {md_text(also)}")
             out.append("")
     out += ["## Next step", "", md_text(report.next_step()), ""]
     return "\n".join(out).rstrip() + "\n"
@@ -481,6 +492,9 @@ def render_html(report: Report, exit_code: int) -> str:
                 )
             if i.fix:
                 p.append(f"<dt>Suggested fix</dt><dd>{e(i.fix)}</dd>")
+            if i.merged_from:
+                also = ", ".join(sorted({m["rule"] for m in i.merged_from}))
+                p.append(f"<dt>Also reported by</dt><dd>{e(also)}</dd>")
             p.append("</dl></li>")
         if file_items:
             p.append("</ul>")
@@ -543,6 +557,9 @@ def to_sarif_dict(report: Report, exit_code: int, prefix: str = "") -> dict[str,
         ):
             if value:
                 props[key] = value
+        if i.merged_from:
+            # same problem as seen by other scanners (with their fingerprints)
+            props["mergedFrom"] = i.merged_from
         results.append(
             {
                 "ruleId": i.rule,
@@ -576,6 +593,7 @@ def to_sarif_dict(report: Report, exit_code: int, prefix: str = "") -> dict[str,
                     "bondy": {
                         "baselined": len(report.baselined_items),
                         "suppressed": len(report.suppressed_items),
+                        "duplicatesMerged": report.duplicates_merged,
                         "summary": report.summary(),
                     }
                 },

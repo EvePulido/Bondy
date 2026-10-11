@@ -20,7 +20,12 @@ from bondy.app_utils.browser import (
     find_system_browsers,
     launch_with_label,
 )
-from bondy.config import API_KEY_ENV_VARS, ConfigError, load_settings
+from bondy.config import (
+    API_KEY_ENV_VARS,
+    ConfigError,
+    load_settings,
+    read_dotenv_key,
+)
 from bondy.resources import SKILLS_DIR
 
 PYTHON_MIN, PYTHON_MAX_EXCL = (3, 11), (3, 14)
@@ -96,7 +101,9 @@ def check_browser() -> Check:
         )
 
 
-def check_api_key(env: Mapping[str, str] | None = None) -> Check:
+def check_api_key(
+    env: Mapping[str, str] | None = None, start_dir: Path | None = None
+) -> Check:
     env = os.environ if env is None else env
     for name in API_KEY_ENV_VARS:
         if env.get(name, "").strip():
@@ -104,12 +111,21 @@ def check_api_key(env: Mapping[str, str] | None = None) -> Check:
             return Check(
                 "api-key", "ok", f"{name} is set (value hidden; not validated)"
             )
+    dotenv = read_dotenv_key(start_dir)
+    if dotenv:
+        return Check(
+            "api-key",
+            "ok",
+            f"{dotenv[1]} found in {dotenv[2]} (value hidden; not validated)",
+        )
     return Check(
         "api-key",
         "warn",
         "No API key found; only --no-llm scans will work",
-        "Create a key at https://aistudio.google.com/apikey and set GEMINI_API_KEY "
-        "(PowerShell: $env:GEMINI_API_KEY='...'; bash: export GEMINI_API_KEY=...)",
+        "Create a key at https://aistudio.google.com/apikey and put "
+        "GEMINI_API_KEY=... in a .env file of your project (keep it out of git), "
+        "or set it in the shell (PowerShell: $env:GEMINI_API_KEY='...'; "
+        "bash: export GEMINI_API_KEY=...)",
     )
 
 

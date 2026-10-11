@@ -141,16 +141,23 @@ def apply_baseline(report: Report, baseline: Baseline, checks=()) -> None:
     wanted = {c.strip().removeprefix("WCAG").strip() for c in checks if c.strip()}
     info = BaselineInfo(file=baseline.name, known=len(baseline.entries))
     seen: set[str] = set()
+    # An item merged from several findings is known when ANY of their
+    # fingerprints is in the baseline (baselines made before duplicates were
+    # merged hold one entry per scanner).
+    present = {fp for i in report.items for fp in i.all_fingerprints()}
     for item in report.items:
-        if item.status == "new" and item.fingerprint in baseline.entries:
+        if item.status != "new":
+            continue
+        known = [fp for fp in item.all_fingerprints() if fp in baseline.entries]
+        if known:
             item.status = "baselined"
-            seen.add(item.fingerprint)
+            seen.update(known)
             info.matched += 1
     for fp, entry in baseline.entries.items():
         if fp in seen:
             continue
         # an entry hidden by a suppression this run is neither resolved nor lost
-        if any(i.fingerprint == fp for i in report.items):
+        if fp in present:
             continue
         if _evaluated(entry, report, wanted):
             info.resolved += 1

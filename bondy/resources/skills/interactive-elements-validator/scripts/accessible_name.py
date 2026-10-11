@@ -73,6 +73,9 @@ def check_accessible_name(html_str: str) -> list:
                 if not has_name and icon_classes
                 else None,
                 "inner_html": inner_html.strip(),
+                # element as written in the source (cut at 300 chars): lets the
+                # report tie the finding to ONE element and merge duplicates
+                "html": match.group(0)[:300],
             }
         )
 

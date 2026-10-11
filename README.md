@@ -223,7 +223,7 @@ checks = ["WCAG 1.1.1", "WCAG 3.1.1"]
 exclude = ["node_modules/**", "dist/**"]
 ```
 
-The API key is read from `GEMINI_API_KEY` (first) or `GOOGLE_API_KEY`; it is intentionally **not** accepted in `bondy.toml` because that file is meant to be committed. Variables already set in your shell are never overwritten by `.env`.
+The API key is read from `GEMINI_API_KEY` (first) or `GOOGLE_API_KEY`; it is intentionally **not** accepted in `bondy.toml` because that file is meant to be committed. The easiest setup is a `.env` file in your project root with `GEMINI_API_KEY=...` (make sure `.env` is in your `.gitignore`): `bondy` reads **only** those two variables from it, looking in the current folder up to the project root (`.git` or `bondy.toml`), and never exports anything. Precedence: `--api-key` flag > shell variable > `.env`. The key is never printed (`bondy doctor` only says where it was found).
 
 ### 2c. Reports, baselines, suppressions and CI
 

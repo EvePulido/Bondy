@@ -7,7 +7,9 @@ package (CLI, doctor) without FastAPI or ADK. It never modifies ``os.environ``.
 
 The API key is deliberately *not* readable from ``bondy.toml``: that file is
 meant to be committed to the repository. It comes from ``GEMINI_API_KEY`` or
-``GOOGLE_API_KEY`` (in that order) or, programmatically, from a flag.
+``GOOGLE_API_KEY`` (in that order), from a ``.env`` file of the project (only
+those two variables are read from it; nothing is exported) or, programmatically,
+from a flag. Precedence: flag > environment > ``.env``.
 """
 
 from __future__ import annotations
@@ -319,6 +321,64 @@ def _read_file(path: Path) -> dict[str, Any]:
     return data
 
 
+DOTENV_FILENAME = ".env"
+_PROJECT_MARKERS = (".git", CONFIG_FILENAME)
+
+
+def _parse_dotenv_value(raw: str) -> str:
+    value = raw.strip()
+    if value[:1] in ("'", '"'):
+        quote = value[0]
+        end = value.find(quote, 1)
+        return value[1:end] if end != -1 else value[1:]
+    # unquoted: an inline comment starts at " #"
+    return value.split(" #", 1)[0].strip()
+
+
+def read_dotenv_key(
+    start: Path | str | None = None,
+) -> tuple[str, str, Path] | None:
+    """Finds an API key in the project's ``.env``: ``(key, variable, file)``.
+
+    Looks in ``start`` (default cwd) and then its ancestors, stopping at the
+    first project root (a directory with ``.git`` or ``bondy.toml``); outside a
+    project only ``start`` itself is checked, so a stray ``.env`` in a parent or
+    home folder is never picked up. Only ``GEMINI_API_KEY``/``GOOGLE_API_KEY``
+    are read; no other variable is looked at or exported. Never raises: an
+    unreadable file is treated as absent.
+    """
+    current = Path(start or Path.cwd()).resolve()
+    if current.is_file():
+        current = current.parent
+    for directory in (current, *current.parents):
+        found = _key_from_dotenv(directory / DOTENV_FILENAME)
+        if found:
+            return (*found, directory / DOTENV_FILENAME)
+        if any((directory / m).exists() for m in _PROJECT_MARKERS):
+            return None
+    return None
+
+
+def _key_from_dotenv(path: Path) -> tuple[str, str] | None:
+    try:
+        text = path.read_text(encoding="utf-8-sig", errors="replace")
+    except OSError:
+        return None
+    values: dict[str, str] = {}
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        name, _, raw = line.partition("=")
+        name = name.strip().removeprefix("export ").strip()
+        if name in API_KEY_ENV_VARS:
+            values[name] = _parse_dotenv_value(raw)
+    for name in API_KEY_ENV_VARS:  # same order as the environment
+        if values.get(name):
+            return values[name], name
+    return None
+
+
 def resolve_api_key(env: Mapping[str, str] | None = None) -> str | None:
     """First non-empty of ``GEMINI_API_KEY`` then ``GOOGLE_API_KEY``."""
     env = os.environ if env is None else env
@@ -386,6 +446,10 @@ def load_settings(
     else:
         api_key = resolve_api_key(env)
         sources["api_key"] = "env" if api_key else "unset"
+        if not api_key:
+            dotenv = read_dotenv_key(start_dir)
+            if dotenv:
+                api_key, sources["api_key"] = dotenv[0], "dotenv"
 
     baseline = values["baseline"]
     if baseline and sources["baseline"] == "file" and path is not None:

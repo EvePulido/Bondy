@@ -75,6 +75,11 @@ from bondy.scan import (
 
 EXIT_PARTIAL = 3
 
+# Shape of the findings stored per page. Bump it when a scanner starts to
+# report more/other data, so saved pages from older versions are not reused.
+# 2: accessible-name / labels findings carry the element's HTML (``nodes``).
+FINDINGS_SCHEMA = 2
+
 NO_KEY_NOTE = (
     "No API key found (set GEMINI_API_KEY or GOOGLE_API_KEY): ran deterministic "
     "scanners only, same as --no-llm. Alt-text quality and decorative-image "
@@ -251,6 +256,7 @@ def config_fingerprint(
     """Anything that changes what a page's result would be (B9/B10)."""
     parts = [
         bondy_version(),
+        f"findings={FINDINGS_SCHEMA}",
         ",".join(sorted(settings.checks)),
         f"static={settings.static}",
         f"llm={llm}",

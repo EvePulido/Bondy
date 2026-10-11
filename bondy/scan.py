@@ -235,6 +235,17 @@ def _run_lang(html: str) -> list[dict]:
     return [_finding("lang", check_wcag("lang"), "critical", f"<html lang> {why}")]
 
 
+def _html_node(issue: dict[str, Any]) -> dict[str, Any]:
+    """``nodes`` with the element's own HTML, when the script reported it.
+
+    The selector stays on the node: the report takes selector and snippet from
+    the node, and the fingerprint (selector first) must not change.
+    """
+    if not issue.get("html"):
+        return {}
+    return {"nodes": [{"selector": issue["selector"], "html": issue["html"]}]}
+
+
 def _run_labels(html: str) -> list[dict]:
     mod = _load_script("form-labels-validator", "form_labels.py")
     return [
@@ -244,6 +255,7 @@ def _run_labels(html: str) -> list[dict]:
             "critical",
             f"Form control '{i['selector']}' has no accessible label",
             selector=i["selector"],
+            **_html_node(i),
         )
         for i in mod.check_form_labels(html)
         if not i["has_label"]
@@ -259,6 +271,7 @@ def _run_names(html: str) -> list[dict]:
             "critical",
             f"<{i['type']}> '{i['selector']}' has no accessible name",
             selector=i["selector"],
+            **_html_node(i),
         )
         for i in mod.check_accessible_name(html)
         if not i["has_accessible_name"]
