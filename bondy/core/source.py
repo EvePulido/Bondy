@@ -95,9 +95,9 @@ class PageIndex:
 
     def __init__(self, html: str):
         self.elements = parse_elements(html)
-        self._by_sig: dict[tuple, list[Element]] = {}
+        self._bondy_by_sig: dict[tuple, list[Element]] = {}
         for el in self.elements:
-            self._by_sig.setdefault(el.signature, []).append(el)
+            self._bondy_by_sig.setdefault(el.signature, []).append(el)
 
     def by_selector(self, selector: str) -> list[Element]:
         """The single element a (simple) selector designates, else ``[]``."""
@@ -129,7 +129,7 @@ class PageIndex:
         if snippet:
             el = element_from_snippet(snippet)
             if el is not None:
-                return list(self._by_sig.get(el.signature, []))
+                return list(self._bondy_by_sig.get(el.signature, []))
         if selector:
             return self.by_selector(selector)
         return []

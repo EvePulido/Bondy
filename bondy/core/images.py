@@ -73,19 +73,19 @@ class _ImgCollector(HTMLParser):
     def __init__(self, html: str):
         super().__init__(convert_charrefs=True)
         self.html = html
-        self._line_starts = [0]
+        self._bondy_line_starts = [0]
         for m in re.finditer(r"\n", html):
-            self._line_starts.append(m.end())
+            self._bondy_line_starts.append(m.end())
         self.found: list[dict] = []
-        self._open: list[dict] = []  # open <a>/<button>: {tag, start, imgs}
+        self._bondy_open: list[dict] = []  # open <a>/<button>: {tag, start, imgs}
 
     def _offset(self) -> int:
         line, col = self.getpos()
-        return self._line_starts[line - 1] + col
+        return self._bondy_line_starts[line - 1] + col
 
     def handle_starttag(self, tag, attrs):
         if tag in ("a", "button"):
-            self._open.append({"tag": tag, "start": self._offset(), "imgs": []})
+            self._bondy_open.append({"tag": tag, "start": self._offset(), "imgs": []})
             return
         if tag != "img":
             return
@@ -100,15 +100,15 @@ class _ImgCollector(HTMLParser):
             "context": None,
         }
         self.found.append(item)
-        if self._open:
-            self._open[-1]["imgs"].append(item)
+        if self._bondy_open:
+            self._bondy_open[-1]["imgs"].append(item)
 
     def handle_endtag(self, tag):
         if tag not in ("a", "button"):
             return
-        for i in range(len(self._open) - 1, -1, -1):
-            if self._open[i]["tag"] == tag:
-                el = self._open.pop(i)
+        for i in range(len(self._bondy_open) - 1, -1, -1):
+            if self._bondy_open[i]["tag"] == tag:
+                el = self._bondy_open.pop(i)
                 close = self.html.find(">", self._offset())
                 end = close + 1 if close != -1 else len(self.html)
                 for img in el["imgs"]:

@@ -49,7 +49,7 @@ class _Parser(ElementCollector):
         super().__init__()
         self.directives: list[Directive] = []
         self.problems: list[str] = []
-        self._pending: list[Directive] = []
+        self._bondy_pending: list[Directive] = []
 
     def handle_comment(self, data: str) -> None:
         m = _INLINE.match(data)
@@ -73,15 +73,15 @@ class _Parser(ElementCollector):
             return
         d = Directive(line, rules, re.sub(r"\s+", " ", full.group("reason")))
         self.directives.append(d)
-        self._pending.append(d)
+        self._bondy_pending.append(d)
 
     def handle_starttag(self, tag, attrs):
         before = len(self.elements)
         super().handle_starttag(tag, attrs)
-        if self._pending and len(self.elements) > before:
-            for d in self._pending:
+        if self._bondy_pending and len(self.elements) > before:
+            for d in self._bondy_pending:
                 d.target = self.elements[-1]
-            self._pending = []
+            self._bondy_pending = []
 
 
 def parse_directives(html: str) -> tuple[list[Directive], list[str]]:
