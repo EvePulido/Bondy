@@ -482,7 +482,10 @@ def open_page(
         yield page
     finally:
         if session is not None:
-            if context is not None:
+            # A watchdog kill left no driver to answer: on Linux (CPython
+            # 3.13) ``context.close()`` then blocks forever. The session
+            # relaunches the whole browser, so the context needs no close.
+            if context is not None and not (session.page_hung or session._driver_dead):
                 try:
                     context.close()
                 except Exception:
