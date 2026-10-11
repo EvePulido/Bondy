@@ -72,8 +72,11 @@ jobs:
       - name: Type check (ty)
         run: uv run ty check bondy tests
 
+      # faulthandler_timeout dumps every thread's stack if a test hangs, so a
+      # stuck run shows WHERE instead of burning the job until the timeout.
       - name: Unit tests
-        run: uv run pytest tests/unit -q
+        timeout-minutes: 15
+        run: uv run pytest tests/unit -q -o faulthandler_timeout=240
 
   # Builds the image WITH Chromium and checks that the browser really works
   # inside it. Not run on pull requests (about 3 minutes and ~2.5 GB image):
