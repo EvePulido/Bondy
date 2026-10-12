@@ -35,7 +35,6 @@ dev = [
 server = [
     "fastapi>=0.100.0",
     "uvicorn>=0.22.0",
-    "python-dotenv>=1.0.0",
 ]
 # ADK agent mode (BondyAccessibilityAgent).
 agent = [
@@ -48,11 +47,6 @@ gcp = [
     "opentelemetry-instrumentation-google-genai>=0.1.0,<1.0.0",
     "gcsfs>=2024.11.0",
     "google-cloud-logging>=3.12.0,<4.0.0",
-]
-# GitHub reader MCP server (`mcp_server/github_server.py`).
-mcp = [
-    "mcp>=1.0.0",
-    "PyGithub>=2.1.0",
 ]
 eval = [
     "google-adk[eval]>=2.0.0,<3.0.0",

@@ -354,6 +354,7 @@ def test_severity_is_the_worst_of_the_merged(tmp_path):
 
 def test_element_helpers():
     sigs = element_key(Item("a", "axe", "r", [], "critical", "m", snippet=SEARCH), None)
+    assert sigs is not None
     assert [s[0] for s in sigs] == ["a", "img"]
     assert same_element(sigs[:1], sigs) and not same_element((), sigs)
 
@@ -545,6 +546,7 @@ def test_random_shuffles_of_a_realistic_page_are_stable(tmp_path):
         )
         want = want or got
         assert got == want
+    assert want is not None
     assert [g[0] for g in want] == ["button-name", "label", "link-name"]
 
 

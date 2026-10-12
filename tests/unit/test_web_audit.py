@@ -105,6 +105,8 @@ def test_scan_to_payload_contract_and_stats(tmp_path):
     for entry in payload["data"]:
         assert CONTRACT_KEYS <= set(entry)
         assert entry["severity"] in ("critical", "warning")
+        # app.js relies on this: it has no fallback when they are missing
+        assert entry["wcag"] and entry["title"]
     first = payload["data"][0]
     assert first["wcag"] == "1.1.1" and first["before"] == '<img src="x.png">'
 
@@ -176,6 +178,8 @@ def test_app_js_has_no_own_wcag_mapping():
         Path(__file__).parents[2] / "bondy" / "resources" / "web" / "app.js"
     ).read_text(encoding="utf-8")
     assert "enabledChecks.push('WCAG" not in js
+    # no heuristic guess of WCAG/title from text: the server always sends them
+    assert "includes('img')" not in js
 
 
 # ----- POST /api/audit -----
@@ -193,6 +197,7 @@ def test_audit_raw_html_without_key_runs_deterministic_and_keeps_contract(
     assert NO_KEY_NOTE in body["notes"]
     assert [d["wcag"] for d in body["data"]] == ["1.1.1", "3.1.1"]
     assert all(CONTRACT_KEYS <= set(d) for d in body["data"])
+    assert all(d["wcag"] and d["title"] for d in body["data"])
     # pasted HTML has no file to patch: no occurrence counts
     assert all("before_occurrences" not in d for d in body["data"])
 

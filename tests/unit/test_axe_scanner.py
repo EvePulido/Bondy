@@ -14,6 +14,7 @@ SITE3 = Path(__file__).parents[2] / "examples/site_3_mixed_errors/index.html"
 
 def _load():
     spec = importlib.util.spec_from_file_location("axe_scan", SCRIPT)
+    assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     sys.modules["axe_scan"] = module
     spec.loader.exec_module(module)

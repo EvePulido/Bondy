@@ -123,7 +123,8 @@ def _add_shared_options(parser: argparse.ArgumentParser) -> None:
         "--timeout",
         dest="timeout",
         type=float,
-        help="seconds per page for browser work (default 60; 0 = no limit)",
+        help="hard limit in seconds per page (default 60; 0 = no limit): a page "
+        "that exceeds it is skipped, its browser killed, and the result is PARTIAL",
     )
     parser.add_argument(
         "--scan-timeout",

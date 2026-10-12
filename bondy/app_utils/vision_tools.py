@@ -11,7 +11,6 @@ import subprocess
 import sys
 import tempfile
 import time
-import urllib.request
 from pathlib import Path
 
 from bondy.core.alt_rules import (  # noqa: F401 - re-exported for agent mode
@@ -27,13 +26,20 @@ from bondy.core.alt_rules import (  # noqa: F401 - re-exported for agent mode
 )
 
 BASE_DIR = Path(__file__).resolve().parents[2]
-VISION_MODEL = os.getenv("BONDY_VISION_MODEL", "gemini-flash-latest")
-FALLBACK_MODEL = os.getenv("BONDY_FALLBACK_MODEL", "gemini-3.5-flash-lite")
 MAX_IMAGE_BYTES = 10 * 1024 * 1024
 
 
 # ----- Shared helpers -----
-_quota_retry_delay = quota_retry_delay  # legacy name
+def _models() -> tuple[str, str]:
+    """``(vision_model, fallback_model)`` from Settings, resolved at call time.
+
+    Precedence flag > ``BONDY_VISION_MODEL``/``BONDY_FALLBACK_MODEL`` >
+    ``bondy.toml`` > default; an empty fallback disables it.
+    """
+    from bondy.config import load_settings_lenient
+
+    s = load_settings_lenient()
+    return s.vision_model, s.fallback_model
 
 
 def _client_kwargs() -> dict:
@@ -42,16 +48,11 @@ def _client_kwargs() -> dict:
     With ``GOOGLE_GENAI_USE_VERTEXAI`` set (Vertex AI, no key) or no key at all
     the SDK keeps resolving credentials from the environment, as before.
     """
-    if os.getenv("GOOGLE_GENAI_USE_VERTEXAI", "").strip().lower() in {"1", "true"}:
+    from bondy.config import load_settings_lenient, use_vertexai
+
+    if use_vertexai():
         return {}
-    try:
-        from bondy.config import load_settings
-
-        key = load_settings().api_key
-    except Exception:  # unreadable bondy.toml: fall back to the environment
-        from bondy.config import resolve_api_key
-
-        key = resolve_api_key()
+    key = load_settings_lenient().api_key
     return {"vertexai": False, "api_key": key} if key else {}
 
 
@@ -70,7 +71,7 @@ def _generate(contents: list, json_output: bool = False, schema=None) -> str:
         response_schema=schema,
     )
     last_error: Exception | None = None
-    for model in [m for m in (VISION_MODEL, FALLBACK_MODEL) if m]:
+    for model in [m for m in _models() if m]:
         for attempt in range(2):
             try:
                 res = client.models.generate_content(
@@ -79,7 +80,7 @@ def _generate(contents: list, json_output: bool = False, schema=None) -> str:
                 return res.text or ""
             except Exception as e:  # 503 / quota / model unavailable
                 last_error = e
-                delay = _quota_retry_delay(e)
+                delay = quota_retry_delay(e)
                 if delay is None or attempt == 1:
                     break  # not a quota error, or already retried: next model
                 time.sleep(delay)  # wait out the per-minute quota, retry same model
@@ -89,14 +90,11 @@ def _generate(contents: list, json_output: bool = False, schema=None) -> str:
 def _load_image(url: str) -> tuple[bytes, str]:
     """Loads an image from a public URL or from the local examples folder."""
     if url.startswith(("http://", "https://")):
-        from bondy.app_utils.security import validate_public_url
+        from bondy.core.netguard import fetch_public_bytes
 
-        validate_public_url(url)
-        req = urllib.request.Request(url, headers={"User-Agent": "Bondy/1.0"})
-        with urllib.request.urlopen(req, timeout=10) as response:
-            data = response.read(MAX_IMAGE_BYTES)
-            mime = response.headers.get_content_type()
-        return data, mime if mime.startswith("image/") else "image/jpeg"
+        res = fetch_public_bytes(url, MAX_IMAGE_BYTES, 10)
+        mime = res.content_type
+        return res.data, mime if mime.startswith("image/") else "image/jpeg"
 
     demo_dir = (BASE_DIR / "examples").resolve()
     suffix = url.replace("/", os.sep).lstrip(os.sep)

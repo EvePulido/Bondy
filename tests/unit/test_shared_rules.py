@@ -17,7 +17,7 @@ def test_agent_tools_reuse_the_core_rules():
         "REDUNDANT_PREFIX",
     ):
         assert getattr(vision_tools, name) is getattr(alt_rules, name)
-    assert vision_tools._quota_retry_delay is alt_rules.quota_retry_delay
+    assert not hasattr(vision_tools, "_quota_retry_delay")  # legacy alias removed
 
 
 def test_core_does_not_import_the_agent_tools_module():

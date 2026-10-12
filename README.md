@@ -1,10 +1,10 @@
 <div align="center">
   <img src="bondy/resources/web/assets/logo-bondy.png" alt="Bondy Logo" width="250"/>
   <h1>Bondy</h1>
-  <p><strong>An autonomous, agentic Web Accessibility Auditor built on Google ADK 2.0.</strong></p>
+  <p><strong>A local, bring-your-own-key web accessibility auditor (WCAG 2.2 AA): deterministic scanners plus an optional Gemini vision stage.</strong></p>
 </div>
 
-Bondy leverages large language models and deterministic Playwright routines to scan web applications, identify accessibility violations (WCAG 2.2 AA), and autonomously suggest exact code fixes.
+Bondy scans HTML files with deterministic Playwright/axe-core routines and, when you provide your own Gemini API key, adds a semantic stage that judges image alt text and suggests exact code fixes. It runs as a command line tool (`bondy`), as a GitHub Action / pre-commit hook and as a small local web UI.
 
 ---
 
@@ -12,8 +12,17 @@ Bondy leverages large language models and deterministic Playwright routines to s
 - [The Problem](#the-problem)
 - [The Solution](#the-solution)
 - [Features](#features)
-- [Architecture & Workflow](#architecture--workflow)
+- [How it works](#how-it-works)
 - [Quick Start](#quick-start)
+  - [Install](#install)
+  - [Quick start: command line](#quick-start-command-line)
+  - [Quick start: web UI](#quick-start-web-ui)
+- [API key and configuration](#api-key-and-configuration)
+- [CLI reference](#cli-reference)
+- [Reports, baselines, suppressions](#reports-baselines-suppressions)
+- [CI, pre-commit and Docker](#ci-pre-commit-and-docker)
+- [Known limitations](#known-limitations)
+- [Deployment to Google Cloud (optional, legacy)](#deployment-to-google-cloud-optional-legacy)
 - [Testing & Linting](#testing--linting)
 - [Security](#security)
 - [Contributors](#contributors)
@@ -39,164 +48,168 @@ Fixing just these issues would significantly improve web accessibility globally.
 
 ## The Solution
 
-**Bondy** bridges the critical gap between passive static linters and expensive human auditors. While tools like Google Lighthouse simply parse source code to check if an `alt` attribute exists, they fail to understand if the image is merely decorative or if the provided text actually makes sense. 
+**Bondy** bridges the gap between passive static linters and expensive human auditors. Tools like Google Lighthouse check whether an `alt` attribute exists; they do not judge whether the image is decorative or whether the text makes sense.
 
-Bondy introduces a paradigm shift by combining **deterministic browser automation (Playwright)** with the **cognitive reasoning of Large Language Models (Gemini Multimodal)**. 
+Bondy combines **deterministic browser automation (Playwright + axe-core)** with the **reasoning of a multimodal LLM (Gemini)** for the part code cannot decide:
 
-Unlike traditional tools, Bondy:
-1. **Navigates like a human**: It physically tabs through the DOM using Playwright to detect invisible focus traps and illogical tab sequences.
-2. **Sees like a human**: It uses Gemini's Multimodal Vision to look at the rendered web page, deciding if an image is purely decorative (requiring an empty `alt=""`) or analyzing if the current description matches the visual context.
-3. **Acts like an engineer**: Once it finds the errors that plague 96% of the web, it doesn't just output a warning, it acts as an autonomous refactoring agent, generating the exact, drop-in HTML patch needed to resolve the WCAG violation.
+1. **Navigates like a human**: it tabs through the DOM with Playwright to detect invisible focus traps and illogical tab sequences.
+2. **Sees like a human**: for `<img>` elements, code triages first (decorative signals, redundant "image of" prefixes, images that cannot be loaded) and only the rest goes to Gemini, which judges whether the alt text matches the image and whether it is decorative, informative or functional.
+3. **Suggests the fix**: for image alt text it produces the exact before/after HTML snippet; for the other findings it explains what to change.
 
 ## Features
 
-- **Autonomous Agent Workflow**: A monolithic AI Agent orchestrator (`BondyAccessibilityAgent`) equipped with a rich `SkillToolset` to sequentially evaluate inputs and bypass strict API rate limits.
-- **Single-Pass Modal Auditing**: Audits and generates complete, generic, and reusable modal accessibility fixes (logical DOM order, role/aria attributes, close buttons, robust focus traps, Escape handlers, background inertness, and focus restoration) in the very first scan.
-- **Playwright Computed Contrast**: Uses a Playwright Chromium headless instance to render the page and extract exact Computed Styles for foreground/background colors, ensuring deterministic and flawless WCAG 1.4.3 contrast ratio calculations without relying on AI mathematical estimations.
-- **Robust JSON Parsing Engine**: Features a fault-tolerant JSON extraction system capable of parsing clean payloads out of arbitrary markdown code blocks and conversational commentary returned by the model.
-- **Deterministic Skills**: 6 highly specialized, deterministic accessibility skills that execute locally via Playwright (e.g., focus trap detection, HTML lang validation).
-- **Deterministic axe-core Baseline**: Every audit starts with axe-core (WCAG 2.0/2.1/2.2 A/AA) plus Chromium's accessibility tree, and the score shown in the UI is computed from real rule counts.
-- **Grounded Vision Checks**: Alt text is verified against the real image with structured, temperature-0 output and explicit anti-hallucination rules; images are classified as decorative, informative or functional; and a screenshot of the rendered page is analyzed for visual issues.
-- **Safe Auto-Fix**: "Apply to File" is offered only when the original snippet appears exactly once in the file.
-- **Security Guardrails**: Strict input validation to ensure only authorized local environments or raw HTML snippets are scanned.
-- **Enterprise-Ready AI**: Runs robustly using Google Cloud Vertex AI, ensuring high availability and bypassing the limitations of free-tier API keys.
+- **Code-driven pipeline**: scanners, then a semantic image stage, then fixes and a report. Code decides the order of steps and the final keep/fix/manual-review decision; the model only judges what an image shows (see [docs/architecture.md](docs/architecture.md)).
+- **Deterministic baseline**: axe-core (WCAG 2.0/2.1/2.2 A/AA) plus Chromium's accessibility tree, computed contrast, keyboard focus (trap/order), `lang`, form labels and accessible names. Works offline with no API key (`--no-llm`).
+- **Static mode**: without a usable browser (or with `--static`) Bondy still runs the HTML-parsing checks and says which ones it skipped.
+- **Bring your own key, with limits**: hard caps (`--max-requests`, `--max-usd`, `--max-pages`, `--max-images`), estimates before spending (`bondy estimate`, `--dry-run`) and a notice of what is sent to the provider before it is sent.
+- **Cache, incremental scans and resume**: `--changed-only`, `--since <git-ref>`, `--resume`.
+- **Several report formats**: terminal, JSON, Markdown, HTML and SARIF 2.1.0 (GitHub code scanning).
+- **Baselines and suppressions with a reason**, so only new findings fail CI.
+- **Duplicate merging**: the same problem reported by several scanners on the same element is shown once.
+- **Safe auto-fix in the web UI**: "Apply to File" is offered only for image patches whose original snippet appears exactly once in the file.
+- **Security guardrails**: SSRF guard for remote images, network-blocked page rendering, secret redaction before anything is sent to the model, localhost-only file writes. See [Security](#security).
 
-## Architecture & Workflow
-
-To circumvent rate limits while maintaining high performance, Bondy uses a single, monolithic `BondyAccessibilityAgent` equipped with 9 specialized skills (`SkillToolset`). This single agent handles the full lifecycle of reading files, validating criteria, and returning a JSON payload of fixes.
+## How it works
 
 ```mermaid
 flowchart TD
-    UI["FastAPI Web Interface"] -->|"URL or HTML Snippet"| SEC{"Security Validator"}
-    SEC -->|"Allowed"| AGENT["BondyAccessibilityAgent"]
-    SEC -->|"Blocked"| ERR["HTTP 403 Forbidden"]
-    
-    subgraph Agent_Runtime ["Agent Runtime"]
-        AGENT -->|"Calls"| PLAY["Playwright Simulator"]
-        AGENT -->|"Calls"| DOM["DOM Parsers"]
-        AGENT -->|"Calls"| VISION["Gemini Vision Model"]
-        
-        PLAY -.->|"Focus Traps, Tab Order and Contrast"| AGENT
-        DOM -.->|"Labels and Lang Attributes"| AGENT
-        VISION -.->|"Contextual Alt Text"| AGENT
-    end
-    
-    AGENT -->|"Synthesizes Findings and Refactors HTML"| JSON_REPORT["JSON Fixes Payload"]
-    JSON_REPORT --> UI
+    CLI["bondy scan (CLI, action, hook)"] --> PIPE["bondy/core/pipeline.py: run_scan"]
+    UI["Web UI / POST /api/audit"] --> WEB["bondy/core/web_audit.py"]
+    WEB --> PIPE
+    PIPE --> SCAN["Deterministic scanners (axe, contrast, focus, lang, labels, accessible names)"]
+    PIPE --> SEM["Semantic image stage (optional, Gemini)"]
+    SCAN --> DEDUPE["dedupe: merge duplicates"]
+    SEM --> DEDUPE
+    DEDUPE --> REPORT["report / formats: terminal, json, markdown, html, sarif"]
+    REPORT --> CLI
+    REPORT --> WEB
 ```
 
-### Skill Mapping
-
-| Category | Associated Skill | Skill Type | Responsibility | WCAG Criterion |
-| :--- | :--- | :--- | :--- | :--- |
-| **Image Auditing** | `alt-text-quality-analyzer` | Gemini Multimodal Vision | Analyzes image context against alt text | 1.1.1 (Non-text Content) |
-| | `image-decorator-classifier` | Gemini Multimodal Vision | Classifies if an image is purely decorative | 1.1.1 (Non-text Content) |
-| **Form Auditing** | `form-labels-validator` | Deterministic (DOM Parsing) | Audits missing associations in input tags | 1.3.1 / 4.1.2 (Labels) |
-| **Keyboard Auditing**| `focus-order-validator` | Playwright Simulation | Detects illogical focus orders and jumps | 2.4.3 (Focus Order) |
-| | `focus-trap-detector` | Playwright Simulation | Detects keyboard focus traps in components | 2.1.2 (No Focus Trap) |
-| **Document Auditing** | `document-language-validator`| Deterministic (DOM Parsing) | Validates root `<html>` lang attribute | 3.1.1 (Language of Page) |
-| | `text-contrast-calculator` | Playwright Simulation (Computed Styles) | Calculates text contrast mathematically against rendered backgrounds | 1.4.3 (Contrast) |
-| | `interactive-elements-validator`| Deterministic (DOM Parsing) | Identifies empty links or button tags | 2.4.4 / 4.1.2 (Name/Role) |
-| **Baseline** | `axe-accessibility-scanner` | Playwright + axe-core (Accessibility Tree) | Deterministic WCAG 2.x A/AA scan and unnamed-control detection | Multiple (2.0 / 2.1 / 2.2) |
-| **Vision tools** | `verify_image_alt_text`, `classify_image_decorative`, `analyze_rendered_page` | Gemini Multimodal Vision + heuristics | Grounded alt verification, decorative/functional classification, rendered-page screenshot analysis | 1.1.1 / 1.4.x |
-| **Refactoring** | `suggestion-fix-generator` | Gemini Text Refactoring | Generates clean HTML replacement code | N/A |
+Details, the module map and what is legacy or optional (the ADK agent `bondy/agent.py`, which the web app mounts only on request) are in [docs/architecture.md](docs/architecture.md). The history of decisions and pending work is in [docs/improvement-plan.md](docs/improvement-plan.md) and [CHANGELOG.md](CHANGELOG.md).
 
 ## Quick Start
 
-### 1. Prerequisites
-- Python 3.12+
-- `uv` (Python Package Manager)
-- A Gemini API key from [Google AI Studio](https://aistudio.google.com/apikey) (free, no billing needed) **or** a Google Cloud Project with Vertex AI enabled.
+### Install
 
-### 2. Installation & Credentials Setup
-1. Clone the repository and sync dependencies. The base install is minimal (Playwright + `google-genai` + Pydantic); the web UI and the ADK agent are opt-in extras:
-   * **Windows / macOS / Linux**:
-     ```bash
-     uv sync                                  # dev checkout: core + dev group (includes server + agent)
-     uv sync --no-dev --extra server --extra agent   # run the web UI + agent only
-     uv pip install "bondy[server,agent]"     # from a built wheel / index
-     ```
+Prerequisites:
+- Python 3.11 to 3.13 (`requires-python = ">=3.11,<3.14"`).
+- [`uv`](https://docs.astral.sh/uv/) (Python package manager).
+- Chromium for the browser-based checks (optional: without it Bondy runs in static mode).
+- A Gemini API key from [Google AI Studio](https://aistudio.google.com/apikey) **only if** you want the semantic image stage. Everything else works without a key.
 
-   | Extra | Adds | Needed for |
-   | :--- | :--- | :--- |
-   | _(none)_ | `playwright`, `google-genai`, `pydantic` | Deterministic scanners and vision tools |
-   | `server` | `fastapi`, `uvicorn`, `python-dotenv` | Local web UI / HTTP API (`bondy.fast_api_app`) |
-   | `agent` | `google-adk` | ADK `BondyAccessibilityAgent` (the web UI uses it today, so install `server` + `agent` together) |
-   | `gcp` | `google-adk[gcp]`, Cloud Logging, GCS, OpenTelemetry GenAI | Cloud Run / Vertex AI deployments only |
-   | `mcp` | `mcp`, `PyGithub` | `mcp_server/github_server.py` |
-   | `eval`, `lint` | evaluation / ruff, ty, codespell | Evaluations and linting |
+```bash
+uv sync                                  # dev checkout: core + dev group (includes server + agent)
+uv run playwright install chromium       # add --with-deps on Linux
+```
 
-   **Telemetry is off by default.** Nothing is sent to Google Cloud unless you install the `gcp` extra *and* opt in with `BONDY_CLOUD_LOGGING=1` (Cloud Logging) and/or `LOGS_BUCKET_NAME` + `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT` (GenAI telemetry).
-2. Install Playwright browsers (required for deterministic visual/focus skills):
-   * **Windows / macOS / Linux**:
-     ```bash
-     uv run playwright install --with-deps chromium
-     ```
-3. **Fastest option — Google AI Studio (no Google Cloud needed):** create an API key at <https://aistudio.google.com/apikey>, copy `.env.example` to `.env` and set:
-   ```env
-   GOOGLE_GENAI_USE_VERTEXAI=False
-   GOOGLE_API_KEY=your-ai-studio-api-key
-   ```
-   Then skip to step 5's "Run" section. The free tier has low quotas: Bondy retries automatically on 429/503 and falls back to a secondary model.
+Other install shapes:
 
-   **Vertex AI option** — follow the next steps if you prefer Google Cloud:
+```bash
+uv sync --no-dev --extra server --extra agent   # run the web UI only
+uv pip install "bondy[server,agent]"            # from a built wheel / index
+```
 
-   Create a Google Cloud Project (if you don't have one):
-   - Go to the [Google Cloud Console (console.cloud.google.com)](https://console.cloud.google.com/).
-   - Create a new project and copy its **Project ID**.
-   - Make sure to enable the **Vertex AI API** in the APIs & Services section for that project.
-4. Authenticate with Google Cloud locally since this project routes traffic globally to handle rate limits:
-   * **Windows / macOS / Linux**:
-     ```bash
-     gcloud auth application-default login
-     gcloud auth application-default set-quota-project your-google-cloud-project-id
-     ```
-5. Configure your local environment variables. You can create a `.env` file in the root directory (copy `.env.example`):
-   ```env
-   # Force ADK to use Vertex AI instead of standard Gemini API
-   GOOGLE_GENAI_USE_VERTEXAI=True
-   
-   # Replace with your own Google Cloud Project ID that has the Vertex AI API enabled
-   GOOGLE_CLOUD_PROJECT=your-google-cloud-project-id
-   GOOGLE_CLOUD_LOCATION=global
-   ```
-   *Alternatively, if you prefer running temporary exports in your terminal:*
-   * **Windows (PowerShell)**:
-     ```powershell
-     $env:GOOGLE_GENAI_USE_VERTEXAI="True"
-     $env:GOOGLE_CLOUD_PROJECT="your-google-cloud-project-id"
-     ```
-   * **macOS / Linux (Bash/Zsh)**:
-     ```bash
-     export GOOGLE_GENAI_USE_VERTEXAI="True"
-     export GOOGLE_CLOUD_PROJECT="your-google-cloud-project-id"
-     ```
-
-#### Optional environment variables
-
-| Variable | Default | Purpose |
+| Extra | Adds | Needed for |
 | :--- | :--- | :--- |
-| `BONDY_FALLBACK_MODEL` | `gemini-3.5-flash-lite` | Model used automatically after a 503 from the primary model. Empty disables it. |
-| `BONDY_VISION_MODEL` | `gemini-flash-latest` | Model for the vision tools (alt text, decorative images, page screenshot). |
-| `BONDY_API_KEY` | _unset_ | If set, `POST /api/apply-fix` requires an `X-API-Key` header. If unset, only localhost can write files. |
+| _(none)_ | `playwright`, `google-genai`, `pydantic` | CLI: deterministic scanners and the Gemini image stage |
+| `server` | `fastapi`, `uvicorn` | Local web UI / HTTP API (`bondy.fast_api_app`) |
+| `agent` | `google-adk` | Only needed to mount the ADK agent routes (`BONDY_ENABLE_AGENT_API=1`, see [Quick start: web UI](#quick-start-web-ui)). `pyproject.toml` still says `server` "requires `agent` as well", and the dev group and the Docker image install both; running `server` alone has not been verified in a clean environment |
+| `gcp` | `google-adk[gcp]`, Cloud Logging, GCS, OpenTelemetry GenAI | Cloud Run / Vertex AI deployments only |
+| `eval`, `lint` | evaluation / ruff, ty, codespell | Evaluations and linting |
 
-### 2b. Command line (no API key needed)
+**Telemetry is off by default.** Nothing is sent to Google Cloud unless you install the `gcp` extra *and* opt in with `BONDY_CLOUD_LOGGING=1` (Cloud Logging) and/or `LOGS_BUCKET_NAME` + `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT` (GenAI telemetry).
+
+### Quick start: command line
 
 ```bash
 bondy --version
-bondy doctor                              # checks Python, Chromium, axe-core, config, API key (offline)
-bondy doctor --check-key                  # + validates the key with 1 minimal request
-bondy scan ./my-site --no-llm             # deterministic scanners on a file or folder
+bondy doctor                              # offline check: Python, Chromium, axe-core, config, API key
+bondy scan ./my-site --no-llm             # deterministic scanners on a file or folder; no key, no network
+bondy scan ./my-site                      # + semantic image stage when an API key is available
+bondy scan index.html about.html docs/    # several files/folders; duplicates are scanned once
 bondy scan page.html --format json --fail-on warning
-bondy scan index.html about.html docs/   # several files/folders; duplicates are scanned once
-bondy scan ./my-site --progress           # live progress on stderr (default: only on a terminal; --quiet hides it)
+bondy estimate ./my-site                  # requests / tokens estimate; calls no model
 ```
 
-`bondy scan` accepts several paths (what the pre-commit hook uses): every missing path is reported at once with exit code 2, and report paths are relative to the common folder of all of them (scan a folder if you need stable paths for baselines or SARIF). Progress (page, image and request batch) and the notice of what is sent to the model go to **stderr**, so `--format json` on stdout stays clean. In LLM mode, before the first download or request, Bondy prints a `NOTICE` with the provider host, the model, how many images (with their alt text and a short HTML snippet) it may send and whether http(s) images will be downloaded; `--quiet` does not hide it. `--mode agent` (the ADK agent) is not available in the CLI yet (pending in `docs/improvement-plan.md`, P4).
+Try it on the bundled sample pages: `bondy scan examples --no-llm`. If `bondy` is not on your `PATH`, use `uv run bondy ...` or `python -m bondy ...` (inside the virtualenv).
 
-`bondy scan` runs axe-core, contrast, keyboard focus (trap/order), `lang`, form labels and accessible-name checks. Without `--no-llm` and **with an API key** (`GEMINI_API_KEY` or `GOOGLE_API_KEY`) it also runs a semantic stage on `<img>` elements: code triages first (decorative signals, redundant "image of" prefixes, images that cannot be loaded) and only the rest goes to Gemini, **several images per request** (`--batch-size`, default 8), with one fused call that judges the alt text and the decorative/informative/functional class. The final keep/fix/manual-review decision is made in code. Without a key it falls back to `--no-llm` and says so.
+Exit codes: `0` nothing at/above `--fail-on` (default `critical`); `1` findings at/above it; `2` usage/config error or a scanner failed (incomplete result); `3` **partial** result (a hard limit, the API quota, `--scan-timeout`, a page that exceeded `--timeout` or Ctrl+C stopped the scan and nothing at/above the threshold was found).
 
-Exit code: `0` nothing at/above `--fail-on` (default `critical`), `1` findings at/above it, `2` usage/config error or a scanner failed (incomplete result), `3` **partial** result (a limit or the API quota stopped the scan and nothing at/above the threshold was found).
+### Quick start: web UI
+
+```bash
+uv run python -m uvicorn bondy.fast_api_app:app --port 8080
+# without uv, inside the virtualenv (Windows: .venv\Scripts\python.exe):
+python -m uvicorn bondy.fast_api_app:app --port 8080
+```
+
+Open <http://localhost:8080>. Notes:
+
+- **Local only.** uvicorn binds to `127.0.0.1` by default; do not expose it with `--host 0.0.0.0`, because `POST /api/apply-fix` writes to disk. That endpoint accepts requests from localhost only, or a valid `X-API-Key` header when `BONDY_APPLY_TOKEN` is set (`BONDY_API_KEY` still works as a deprecated alias). `POST /api/audit` and `/feedback` have no authentication (Bondy assumes a local server), and `/api/audit` can spend Gemini quota when a key is configured: use `BONDY_NO_LLM=1` if the port may be reachable by others.
+- **The ADK agent API is off by default.** The app is a plain FastAPI app with the UI, `/api/*`, `/feedback` and `/health`. The routes of ADK's development server (`/run`, `/run_sse`, `/run_live`, `/list-apps`, sessions, artifacts, `/docs`, `/openapi.json`) exist only if you start the server with `BONDY_ENABLE_AGENT_API=1`; they let a caller drive the agent with your Gemini key, so even then they are guarded: they need the `X-API-Key` header (`BONDY_APPLY_TOKEN`) or a localhost client, the same rule as `/api/apply-fix`. Behind a reverse proxy the client address is the proxy's, so set a token. The UI and `POST /api/audit` do not use the agent.
+- **Spend no quota:** start it with `BONDY_NO_LLM=1` (PowerShell: `$env:BONDY_NO_LLM="1"`; Bash: `export BONDY_NO_LLM=1`) to run only the deterministic checks. Without an API key it does the same and says so in `notes`. Check that port 8080 is free: an older server on the same port would silently answer instead.
+- **What it accepts.** Either HTML pasted in the UI's HTML tab, or a path inside the repository's `examples/` folder, relative to the repository root: `examples/site_1_bad_alt` or `examples/my_folder/index.html`. A folder resolves to its `index.html`. Absolute paths, `..` and anything outside `examples/` are rejected with HTTP 403 (the old `demo_sites/` paths too). To audit your own pages, drop them into `examples/` or use the CLI, which accepts any local path.
+- **"Apply to File"** is offered only for image patches (alt text) whose original snippet appears exactly once in the file; other findings carry advice text only.
+- The UI runs the same pipeline as the CLI (`bondy/core/web_audit.py`), with a verdict cache in `.bondy/cache` at the repository root (git-ignored).
+
+## API key and configuration
+
+The CLI and the web server read the Gemini API key from `GEMINI_API_KEY` (first) or `GOOGLE_API_KEY`, set in the environment or in a `.env` file at the project root. Copy `.env.example` to `.env` and fill one of them in (make sure `.env` is in your `.gitignore`):
+
+```env
+GEMINI_API_KEY=your-ai-studio-api-key
+```
+
+- The CLI reads **only those two variables** from `.env`, looking from the current folder up to the project root (`.git` or `bondy.toml`), and never exports anything. Precedence: flag (programmatic use only: the CLI has no `--api-key` option) > shell variable > `.env`. The web server copies only an **allowlist** of the repository-root `.env` into its environment (`bondy.config.export_dotenv_to_environ`): names starting with `BONDY_`, `GEMINI_`, `GOOGLE_`, `GENAI_` or `OTEL_`, plus `ALLOW_ORIGINS`, `LOGS_BUCKET_NAME` and `COMMIT_SHA`. Any other variable in the file (`PATH`, `HOME`...) is ignored, and variables already set in the shell are never overridden. The `.env` parser is Bondy's own: it does not interpolate variables or accept multi-line values.
+- The key is intentionally **not** accepted in `bondy.toml`, because that file is meant to be committed. It is never printed: `bondy doctor` only says where it was found, and `bondy doctor --check-key` validates it with one minimal request (opt-in; plain `doctor` stays offline).
+- The semantic stage always talks to the Gemini API with an AI Studio key. `GOOGLE_GENAI_USE_VERTEXAI` / `GOOGLE_CLOUD_PROJECT` / `GOOGLE_CLOUD_LOCATION` only affect the legacy ADK agent (see [docs/architecture.md](docs/architecture.md)).
+- The free tier of the Gemini API has low quotas and may use content to improve Google products.
+
+### Models and quota
+
+| Setting | Env variable | Default | Purpose |
+| :--- | :--- | :--- | :--- |
+| `model` | `BONDY_MODEL` | `gemini-flash-latest` | Primary model for text requests. |
+| `vision_model` | `BONDY_VISION_MODEL` | `gemini-flash-latest` | Primary model for requests that carry images (the semantic image stage). |
+| `fallback_model` | `BONDY_FALLBACK_MODEL` | `gemini-3.5-flash-lite` | Used when the primary model fails (empty disables it). |
+
+Each request tries the primary model first. A per-minute 429 is retried once after the server's `retryDelay`; a daily quota, a 503, a timeout or any other error moves to the fallback model immediately. **Practical consequence:** if the primary model answers 429 for your key, every batch spends one extra request (two with a per-minute 429) before it reaches the fallback, and those requests count against `--max-requests`. Set `BONDY_MODEL` and `BONDY_VISION_MODEL` to the model that actually works for you (for example `gemini-3.5-flash-lite`) to avoid it.
+
+### Configuration precedence
+
+**Flag > environment variable > `bondy.toml` > default.** `bondy.toml` is searched upward from the current directory (or pass `--config`). Keys: `model`, `vision_model`, `fallback_model`, `no_llm`, `static`, `format` (`terminal`|`json`|`markdown`|`html`|`sarif`), `fail_on` (`critical`|`warning`|`never`), `checks`, `include`, `exclude`, `batch_size`, `max_requests`, `max_usd`, `max_pages`, `max_images`, `price_input_per_mtok`, `price_output_per_mtok`, `tokens_per_image`, `remote_images`, `cache`, `cache_dir`, `timeout`, `scan_timeout`, `baseline`, and `[[ignore]]` tables (file only). Each key has an environment variable (`BONDY_MODEL`, `BONDY_VISION_MODEL`, `BONDY_FALLBACK_MODEL`, `BONDY_NO_LLM`, `BONDY_STATIC`, `BONDY_FORMAT`, `BONDY_FAIL_ON`, `BONDY_CHECKS`, `BONDY_INCLUDE`, `BONDY_EXCLUDE`, `BONDY_BATCH_SIZE`, `BONDY_MAX_REQUESTS`, `BONDY_MAX_USD`, `BONDY_MAX_PAGES`, `BONDY_MAX_IMAGES`, `BONDY_PRICE_INPUT_PER_MTOK`, `BONDY_PRICE_OUTPUT_PER_MTOK`, `BONDY_TOKENS_PER_IMAGE`, `BONDY_REMOTE_IMAGES`, `BONDY_CACHE`, `BONDY_CACHE_DIR`, `BONDY_TIMEOUT`, `BONDY_SCAN_TIMEOUT`, `BONDY_BASELINE`; lists are comma-separated).
+
+```toml
+# bondy.toml
+fail_on = "warning"
+checks = ["WCAG 1.1.1", "WCAG 3.1.1"]
+exclude = ["node_modules/**", "dist/**"]
+```
+
+Other environment variables:
+
+| Variable | Purpose |
+| :--- | :--- |
+| `BONDY_APPLY_TOKEN` | Web server. If set, `POST /api/apply-fix` (and the agent routes, when enabled) require it in the `X-API-Key` header. If unset, only localhost is accepted. Unrelated to the Gemini key. |
+| `BONDY_API_KEY` | **Deprecated** alias of `BONDY_APPLY_TOKEN` (also unrelated to the Gemini key). It still works and the server logs a warning at start-up; if both are set, `BONDY_APPLY_TOKEN` wins. |
+| `BONDY_ENABLE_AGENT_API` | `1`/`true`/`yes`/`on` mounts the ADK agent routes (needs the `agent` extra). Off by default; see [Quick start: web UI](#quick-start-web-ui). |
+| `BONDY_CLOUD_LOGGING` | `1` enables Cloud Logging (needs the `gcp` extra). |
+
+## CLI reference
+
+Run `bondy <command> --help` for the authoritative list of flags. Commands: `scan`, `estimate`, `doctor`, `baseline create`, `cache clear`.
+
+### Scanning
+
+`bondy scan PATH [PATH ...]` accepts several files and folders (what the pre-commit hook uses): every missing path is reported at once with exit code 2, and report paths are relative to the common folder of all of them (scan a folder if you need stable paths for baselines or SARIF).
+
+It runs axe-core, contrast, keyboard focus (trap/order), `lang`, form labels and accessible-name checks. Without `--no-llm` and **with an API key** it also runs a semantic stage on `<img>` elements: **several images per request** (`--batch-size`, default 8), with one fused call that judges the alt text and the decorative/informative/functional class. The final keep/fix/manual-review decision is made in code. Without a key it falls back to `--no-llm` and says so. `--static` forces static mode (HTML parsing only, never launches a browser).
+
+**Progress and notice.** Progress (page, image and request batch) and the notice of what is sent to the model go to **stderr**, so `--format json` on stdout stays clean. Progress is shown by default only on a terminal: `--progress` forces it, `-q/--quiet` hides it. In LLM mode, before the first download or request, Bondy prints a `NOTICE` with the provider host, the model, how many images (with their alt text and a short HTML snippet) it may send and whether http(s) images will be downloaded; `--quiet` does not hide it.
+
+`--mode agent` (the ADK agent) is not available in the CLI yet (pending in `docs/improvement-plan.md`, P4).
+
+### Limits, cost and prices
 
 ```bash
 bondy estimate ./my-site                  # requests / tokens / cost estimate; calls no model
@@ -208,24 +221,30 @@ Hard limits (`--max-requests`, `--max-usd`, `--max-pages`, `--max-images`; also 
 
 **Prices are never assumed.** Bondy ships no price values: set `price_input_per_mtok` and `price_output_per_mtok` (USD per million tokens, from your provider's price list) in `bondy.toml` or `BONDY_PRICE_INPUT_PER_MTOK` / `BONDY_PRICE_OUTPUT_PER_MTOK`. Without them `estimate`, `--dry-run` and the usage summary show requests and tokens and say the dollar cost is not available (JSON: `cost_usd: null` plus `cost_unavailable_reason`). `--max-usd` needs prices: without them the command fails with exit code 2 before calling the model. `estimate` is an approximation (characters/4 plus `tokens_per_image`), not a quote.
 
-Images in the HTML are sent to the provider: local files inside the project root, and public http(s) images, which Bondy downloads (public hosts only, redirects re-checked). Use `--no-remote-images` (`remote_images = false`, `BONDY_REMOTE_IMAGES=0`) to skip downloading remote images; they then go to manual review. The free tier of the Gemini API may use content to improve Google products.
+### What is sent to the provider
 
-**Cache, incremental scans and resuming.** When something needs it (a scan that uses the model, `--changed-only`, `--since` or `--resume`), Bondy keeps a small cache under `<scanned folder>/.bondy/cache` and puts a `.gitignore` containing `*` inside `.bondy/` so it never shows up in your `git status`. A plain deterministic scan (`bondy scan --no-llm`) writes nothing into the scanned folder. The cache holds: one model verdict per image (key = image bytes + alt + the context sent + model + prompt/schema version), the result of each finished page and a marker when a scan was cut short. Consequences: re-scanning an unchanged project makes **0 requests**; `bondy scan --changed-only` also skips unchanged pages entirely (HTML and local images hashed) and marks them `reused`; `--since <git-ref>` scans only files changed vs a ref and reuses the saved result (same content hash and configuration) for the untouched ones; those without a valid saved result are listed as `skipped`, not as a partial result. If the scan stops (daily quota, `--max-*`, `--scan-timeout`, Ctrl+C: it exits with code 3 and saves what is done) run it again with `--resume` and finished work is not repeated. `--no-cache` disables all of it (`cache = false`), `--cache-dir` moves it, `--clear-cache` / `bondy cache clear` empties it (only Bondy's own files). Entries contain no API key or absolute paths. Remote images are identified by URL for page reuse, so a remote image that changes under the same URL is not detected by `--changed-only`.
+Images in the HTML are sent to the provider: local files inside the project root, and public http(s) images, which Bondy downloads through a single guard, `bondy/core/netguard.py` (the host is resolved once and the connection goes to that validated IP; every redirect is re-validated, at most 3; see [Security](#security)). Use `--no-remote-images` (`remote_images = false`, `BONDY_REMOTE_IMAGES=0`) to skip downloading remote images; they then go to manual review.
 
-`bondy doctor --check-key` validates your API key with one minimal request (opt-in; plain `doctor` stays offline) and tells a rejected key from an exhausted quota or no network. `scan` stops immediately (exit 2, no retries) if the first batch shows the key is invalid; a fully cached scan needs no key. Scanners share one browser per scan; `--timeout` (seconds per page, default 60) and `--scan-timeout` (default 900) bound the work, `0` = no limit. Known limit: a page whose JavaScript starts spinning *after* load can block `--timeout` until the browser closes the tab (about 85 s measured), because `--scan-timeout` is checked between pages, scanners and batches, not inside a blocked evaluation. If that happens, use `--scan-timeout` and `--resume` to continue without repeating finished work.
+**Secret redaction.** Before the HTML context and alt text are sent to the model (and before they are hashed into the verdict cache, so secrets never reach `.bondy/`), Bondy replaces secret-looking values with `[REDACTED]`: `AIza...`, `sk-...`, `ghp_...`, `AKIA...`, `Bearer`/JWT tokens, PEM private keys, `api_key=`/`token=`/`password=`-style assignments and URLs with credentials or `?token=`/`?key=`. Report snippets are redacted the same way, and a page whose findings quote secret-like text is not saved for `--changed-only` reuse. Files such as `.env`, `*.pem` or `id_rsa` are never loaded as images. This is **pattern matching, not a guarantee**: unusual formats, secrets inside image pixels or split by the context window are not caught; do not scan code you may not share with your provider.
 
-**Configuration precedence: flag > environment variable > `bondy.toml` > default.** `bondy.toml` is searched upward from the current directory (or pass `--config`). Keys: `model`, `vision_model`, `fallback_model`, `no_llm`, `static`, `format` (`terminal`|`json`|`markdown`|`html`|`sarif`), `fail_on` (`critical`|`warning`|`never`), `checks`, `include`, `exclude`, `batch_size`, `max_requests`, `max_usd`, `max_pages`, `max_images`, `price_input_per_mtok`, `price_output_per_mtok`, `tokens_per_image`, `remote_images`, `cache`, `cache_dir`, `timeout`, `scan_timeout`, `baseline`, and `[[ignore]]` tables (file only). Each key has an environment variable (`BONDY_MODEL`, `BONDY_VISION_MODEL`, `BONDY_FALLBACK_MODEL`, `BONDY_NO_LLM`, `BONDY_FORMAT`, `BONDY_FAIL_ON`, `BONDY_CHECKS`, `BONDY_INCLUDE`, `BONDY_EXCLUDE`, `BONDY_BATCH_SIZE`, `BONDY_MAX_REQUESTS`, `BONDY_MAX_USD`, `BONDY_MAX_PAGES`, `BONDY_MAX_IMAGES`, `BONDY_PRICE_INPUT_PER_MTOK`, `BONDY_PRICE_OUTPUT_PER_MTOK`, `BONDY_TOKENS_PER_IMAGE`, `BONDY_REMOTE_IMAGES`, `BONDY_CACHE`, `BONDY_CACHE_DIR`, `BONDY_TIMEOUT`, `BONDY_SCAN_TIMEOUT`, `BONDY_BASELINE`; lists are comma-separated).
+### Cache, incremental scans and resuming
 
-```toml
-# bondy.toml
-fail_on = "warning"
-checks = ["WCAG 1.1.1", "WCAG 3.1.1"]
-exclude = ["node_modules/**", "dist/**"]
-```
+When something needs it (a scan that uses the model, `--changed-only`, `--since` or `--resume`), Bondy keeps a small cache under `<scanned folder>/.bondy/cache` and puts a `.gitignore` containing `*` inside `.bondy/` so it never shows up in your `git status`. A plain deterministic scan (`bondy scan --no-llm`) writes nothing into the scanned folder. The cache holds: one model verdict per image (key = image bytes + alt + the context sent + model + prompt/schema version), the result of each finished page and a marker when a scan was cut short.
 
-The API key is read from `GEMINI_API_KEY` (first) or `GOOGLE_API_KEY`; it is intentionally **not** accepted in `bondy.toml` because that file is meant to be committed. The easiest setup is a `.env` file in your project root with `GEMINI_API_KEY=...` (make sure `.env` is in your `.gitignore`): `bondy` reads **only** those two variables from it, looking in the current folder up to the project root (`.git` or `bondy.toml`), and never exports anything. Precedence: `--api-key` flag > shell variable > `.env`. The key is never printed (`bondy doctor` only says where it was found).
+- Re-scanning an unchanged project makes **0 requests**.
+- `--changed-only` also skips unchanged pages entirely (HTML and local images hashed) and marks them `reused`.
+- `--since <git-ref>` scans only files changed vs a ref and reuses the saved result (same content hash and configuration) for the untouched ones; those without a valid saved result are listed as `skipped`, not as a partial result.
+- If the scan stops (daily quota, `--max-*`, `--scan-timeout`, Ctrl+C: it exits with code 3 and saves what is done), run it again with `--resume` and finished work is not repeated.
+- `--no-cache` disables all of it (`cache = false`), `--cache-dir` moves it, `--clear-cache` / `bondy cache clear` empties it (only Bondy's own files). Entries contain no API key or absolute paths.
+- Remote images are identified by URL for page reuse, so a remote image that changes under the same URL is not detected by `--changed-only`.
 
-### 2c. Reports, baselines, suppressions and CI
+### Timeouts and key validation
+
+`scan` stops immediately (exit 2, no retries) if the first batch shows the key is invalid; a fully cached scan needs no key. Scanners share one browser per scan; `--timeout` (seconds per page, default 60) and `--scan-timeout` (default 900) bound the work, `0` = no limit.
+
+Both are **hard** limits. Playwright has no timeout for `page.evaluate`, so a per-page watchdog (inside the browser session) arms a timer for each page; if the page is still being scanned when it fires (a JavaScript loop after `load`, for example), Bondy kills the Playwright driver process tree and continues with the remaining pages in a fresh browser. The budget of a page is `--timeout`, capped by what is left of `--scan-timeout`; launching the browser does not count as page time. The hung page is not reported as a finding or an error: it is listed as `skipped` (`page exceeded --timeout (hung page, browser killed)`, or `--scan-timeout reached` when the global limit was the cause), its partial findings are discarded, the result is **partial** (exit 3, or 1 if other pages have findings at/above `--fail-on`) and the page stays pending in `resume.json` for `--resume`. See [Known limitations](#known-limitations) for the caveats.
+
+## Reports, baselines, suppressions
 
 ```bash
 bondy scan ./site --format markdown --output report.md   # terminal | json | markdown | html | sarif
@@ -235,6 +254,8 @@ bondy scan ./site --baseline bondy-baseline.json         # only NEW findings fai
 ```
 
 **Formats.** All of them are rendered from one internal report. Paths are always relative to the scanned folder with `/` separators (never your absolute paths). `html` is a single self-contained file (inline CSS, no JavaScript, no remote resources, landmarks, `lang`, AA contrast, a restrictive CSP). Everything that comes from the scanned project (HTML, alt text, selectors, paths) is treated as untrusted data and escaped for the target format. `--output FILE` writes the report there and still prints the terminal summary. The exit code does not depend on the format. In SARIF each result carries a stable `partialFingerprints` value; GitHub resolves paths from the repository root, so when you scan a sub-folder pass `--sarif-prefix <folder relative to the repo root>` (the bundled action does it for you). Baselined and suppressed findings are not emitted as SARIF results (GitHub code scanning does not document support for `suppressions`/`baselineState`); their counts are in `runs[].properties.bondy`.
+
+**Duplicates merged.** Several scanners can look at one element from different angles (for an unnamed `<a href="/search"><img src="search.png"></a>`: axe `link-name`, the accessibility-tree check and the HTML check). Bondy shows that problem once, with the best evidence, the worst severity and the union of WCAG criteria; the rest is kept in `merged_from` (JSON, SARIF `properties.mergedFrom`, "Also reported by" in Markdown/HTML) and counted as "Duplicates merged" in the summary. Only findings of the same file, the same problem family and the same element are merged; problems of a different nature (contrast vs name, the link name vs the `alt` of the image inside it, focus order...) never merge. Effect on the rest: the surviving finding keeps its own fingerprint and carries the others, so a baseline made before the merge still matches (it matches when **any** of the fingerprints is in the baseline), and an ignore comment or `[[ignore]]` naming the rule of **any** merged scanner applies to the merged finding.
 
 **Baseline.** A finding's fingerprint is rule + path relative to the scanned folder + normalized selector or HTML fragment, never a line number, so moving code around does not resurrect old findings. `--baseline FILE` (also `baseline` in `bondy.toml`, relative to that file, or `BONDY_BASELINE`) hides known findings, reports how many were hidden and how many were **resolved** (so you can regenerate a smaller baseline) and only new findings count for the exit code. A corrupt, unknown-version or missing baseline is a usage error (exit 2) detected before anything is scanned or spent. `baseline create` refuses to write when the scan had errors or is partial. Create the baseline in the same mode you run in CI (browser vs static, with or without the model): findings of checks that did not run are reported as "not re-evaluated", not as resolved.
 
@@ -255,75 +276,96 @@ reason = "legacy pages are retired in Q3"
 
 The comment applies to the next element (a comment before `<html>` applies to page-level findings such as a missing `lang`). Identical elements are indistinguishable and are suppressed together; findings that Bondy cannot tie to one element are never suppressed by a comment (use `[[ignore]]`). A missing reason, an unparsable rule or a path that leaves the folder is a usage error (exit 2). Every report lists the applied suppressions with their reason and warns about **obsolete** ones (matching nothing); an unknown-but-well-formed rule name shows up as obsolete, because the axe rule list is not enumerable offline.
 
-**Secret redaction.** Before the HTML context and alt text are sent to the model (and before they are hashed into the verdict cache, so secrets never reach `.bondy/`), Bondy replaces secret-looking values with `[REDACTED]`: `AIza...`, `sk-...`, `ghp_...`, `AKIA...`, `Bearer`/JWT tokens, PEM private keys, `api_key=`/`token=`/`password=`-style assignments and URLs with credentials or `?token=`/`?key=`. Report snippets are redacted the same way, and a page whose findings quote secret-like text is not saved for `--changed-only` reuse. Files such as `.env`, `*.pem` or `id_rsa` are never loaded as images. This is **pattern matching, not a guarantee**: unusual formats, secrets inside image pixels or split by the context window are not caught; do not scan code you may not share with your provider.
+**Summary and next step.** Every run ends with new findings by severity, how many were hidden by the baseline or suppressed, duplicates merged, pages scanned/reused/skipped, the model usage and a concrete next step; the JSON has the same numbers under `summary`.
 
-**Summary and next step.** Every run ends with new findings by severity, how many were hidden by the baseline or suppressed, pages scanned/reused/skipped, the model usage and a concrete next step; the JSON has the same numbers under `summary`.
+## CI, pre-commit and Docker
 
-**CI.** `action.yml` is a composite GitHub Action (inputs `path`, `fail-on`, `format`, `baseline`, `changed-only`, `since`, `gemini-api-key`, ...) that installs Bondy, scans and uploads the SARIF with `github/codeql-action/upload-sarif` pinned to a commit. `.pre-commit-hooks.yaml` defines a `bondy` hook that scans the HTML files pre-commit passes it (`bondy scan --no-llm --no-cache <files>`), offline and without writing a cache. The action pins its third-party actions to full commit SHAs verified with `git ls-remote`; from another repository use the action as `uses: EvePulido/Bondy@v0.1.1` and the hook with `repo: https://github.com/EvePulido/Bondy` / `rev: v0.1.1` (a branch such as `main` also works, but it is not reproducible). A ready-to-copy, inactive workflow is in `docs/ci-example.yml`.
+**GitHub Action.** `action.yml` is a composite action (inputs `path`, `fail-on`, `format`, `output`, `baseline`, `changed-only`, `since`, `no-llm`, `gemini-api-key`, `install-browser`, `upload-sarif`, `python-version`) that installs Bondy, scans and uploads the SARIF with `github/codeql-action/upload-sarif` pinned to a commit. From another repository:
 
-### 3. Run the API and Web UI Locally
-Launch the built-in FastAPI server to access the Bondy Web UI:
-* **Windows / macOS / Linux**:
-  ```bash
-  uv run python -m uvicorn bondy.fast_api_app:app --reload --port 8080
-  ```
-  Go to `http://localhost:8080` to interact with the agent.
+```yaml
+- uses: EvePulido/Bondy@v0.1.1
+  with:
+    path: site
+    fail-on: critical
+    gemini-api-key: ${{ secrets.GEMINI_API_KEY }}   # optional; without it only deterministic scanners run
+```
 
-### 4. Deployment to Google Cloud (Optional)
-Bondy can be fully deployed to your own Google Cloud environment (Cloud Run) using the ADK `agents-cli`:
+A ready-to-copy, inactive workflow is in [docs/ci-example.yml](docs/ci-example.yml). The action pins its third-party actions to full commit SHAs verified with `git ls-remote`. A branch such as `main` also works as a ref, but it is not reproducible.
+
+**Permissions and forks.** Uploading to code scanning needs `security-events: write` in the workflow's `permissions` (plus `contents: read`) and, in private repositories, code scanning enabled (GitHub Advanced Security); without it the upload fails, which is why that step has `continue-on-error: true` and cannot hide the scan result. Pull requests from forks and from Dependabot get a read-only `GITHUB_TOKEN`, so on those `pull_request` runs the action skips the upload, prints a `::notice::` and keeps the SARIF as a workflow artifact named `bondy-sarif` (`actions/upload-artifact`, pinned by SHA). This has only been checked locally (valid YAML and a structural test); it has not run on a real fork pull request.
+
+**pre-commit.** `.pre-commit-hooks.yaml` defines a `bondy` hook that scans the HTML files pre-commit passes it (`bondy scan --no-llm --no-cache <files>`), offline and without writing a cache:
+
+```yaml
+repos:
+  - repo: https://github.com/EvePulido/Bondy
+    rev: v0.1.1
+    hooks:
+      - id: bondy
+        args: [--fail-on, warning]   # extra `bondy scan` flags
+```
+
+**This repository's CI.** `.github/workflows/ci.yml` runs `ruff check`, `ruff format --check`, `ty check bondy tests` and `pytest tests/unit` on a matrix of Ubuntu, Windows and macOS with Python 3.11 and 3.13. A separate `docker` job (pushes to `main` and manual `workflow_dispatch`, never pull requests) builds the image with Chromium and runs `bondy doctor` and `bondy scan examples --no-llm` in it; that job has **not been executed on GitHub yet**, only its steps were run locally.
+
+**Docker image.** The `Dockerfile` installs the `server`, `agent` and `gcp` extras from `uv.lock` and starts `uvicorn` on `0.0.0.0:8080` from the project virtualenv. By default it does **not** install Chromium (about 400 MB less): the web app then runs in *static mode* (HTML-parsing checks only, said in `notes`). Build with `--build-arg INSTALL_CHROMIUM=true` for the full deterministic scan (axe-core, contrast, focus):
+
+```bash
+docker build --build-arg INSTALL_CHROMIUM=true -t bondy:chromium .
+docker run --rm bondy:chromium bondy doctor                    # should report Playwright Chromium
+docker run --rm bondy:chromium bondy scan examples --no-llm    # exit 1 = findings, no STATIC MODE note
+docker run --rm -p 8080:8080 -e BONDY_NO_LLM=1 bondy:chromium  # web UI
+```
+
+Verified locally on 2026-10-11 (Docker Desktop 28.3.3): the build with Chromium works (about 2.5 GB image against about 1 GB without it), `bondy doctor` reports Playwright Chromium and the scan runs axe, focus and contrast without the `STATIC MODE` note. The `uv` version comes from `ARG UV_VERSION` in the `Dockerfile`, the same value as `ci.yml` (keep both in sync by hand).
+
+- **The container runs as `root`; there is no non-root user.** Playwright installs the browser under `/root/.cache/ms-playwright`, and `docker run --user 1000:1000` makes `bondy doctor` fall back to static mode and fail on write access to `/code`. A non-root `USER` would need `PLAYWRIGHT_BROWSERS_PATH`, ownership of `/code` and a writable home; it is not done.
+- Set `BONDY_NO_LLM=1` to keep the container from calling a model. The container listens on all interfaces: `POST /api/apply-fix` still requires a localhost client or `BONDY_APPLY_TOKEN`, but `POST /api/audit` and `/feedback` have no authentication, so do not publish the port beyond your machine. The ADK agent routes are not mounted unless you set `BONDY_ENABLE_AGENT_API=1`.
+- The image has no `HEALTHCHECK`.
+
+## Known limitations
+
+- **JavaScript that spins after load.** A page whose JavaScript starts an endless loop *after* `load` blocks `page.evaluate`, which Playwright cannot time out. The per-page watchdog (see [Timeouts and key validation](#timeouts-and-key-validation)) cuts it at `--timeout` by killing the browser driver, and the page is skipped as a partial result. Caveats: it was only exercised on Windows (the POSIX branch, `pkill -P` plus `SIGKILL`, has not been run on macOS or Linux, and the CI matrix that would run the real-Chromium test there has not been executed yet); each kill leaves a `playwright_chromiumdev_profile-*` folder in the OS temp directory; a page that hangs keeps hanging on every `--resume` until you `--exclude` or fix it; and the watchdog only acts inside a Bondy scan (CLI, `run_scan`, web UI), not when a scanner script is called on its own.
+- **The LLM is not deterministic.** The same image can get a different verdict between runs. The verdict cache makes re-scans of unchanged content stable, but a cache miss can change a result. The code-side triage, the final decision and the fix templates are deterministic.
+- **`--mode agent` does not exist in the CLI.** The ADK agent is legacy and is reachable only through the ADK routes that the server mounts when `BONDY_ENABLE_AGENT_API=1` (see [docs/architecture.md](docs/architecture.md)); the CLI and the web UI use the code-driven pipeline.
+- **Templates are not supported.** Bondy scans HTML files. JSX/TSX, Vue, Svelte, Jinja or ERB templates would need their HTML extracted or the rendered build audited (listed as pending, not implemented).
+- **SARIF is not uploaded to code scanning on pull requests from forks or Dependabot**, because their token is read-only. The action skips the upload and keeps the report as the `bondy-sarif` artifact (see [CI, pre-commit and Docker](#ci-pre-commit-and-docker)). Not yet run on a real fork pull request.
+- **Web UI paths.** The UI and API only accept paths inside `examples/` or pasted HTML (see [Quick start: web UI](#quick-start-web-ui)).
+- **Docker** without Chromium runs in static mode, and the image with Chromium runs as root (see above).
+
+## Deployment to Google Cloud (optional, legacy)
+
+> This path deploys the web app using the ADK `agents-cli` (the `Dockerfile` installs the `agent` extra, but the ADK routes are mounted only with `BONDY_ENABLE_AGENT_API=1`). It is not needed for the CLI, the GitHub Action or local use, and it has not been re-verified recently.
 
 1. Provision the base infrastructure (Terraform):
-   * **Windows / macOS / Linux**:
-     ```bash
-     agents-cli infra single-project
-     ```
+   ```bash
+   agents-cli infra single-project
+   ```
 2. Build and deploy the Dockerized application to Cloud Run:
-   * **Windows / macOS / Linux**:
-     ```bash
-     agents-cli deploy
-     ```
+   ```bash
+   agents-cli deploy
+   ```
 
-**Docker image.** The `Dockerfile` installs the `server`, `agent` and `gcp` extras from `uv.lock` and starts `uvicorn` from the project virtualenv. By default it does **not** install Chromium (about 400 MB less): the web app then runs in *static mode* (HTML-parsing checks only, said in `notes`). Build with `--build-arg INSTALL_CHROMIUM=true` for the full deterministic scan (axe-core, contrast, focus). Set `BONDY_NO_LLM=1` to keep the container from calling a model. The image build itself has not been verified in CI yet.
-
-### 5. Auditing Local Files (Usage)
-Bondy supports auditing local files seamlessly. To scan a local project:
-1. Drop your HTML files or folders into the local `examples/` directory within this repository.
-2. Open the Bondy Web UI (`http://localhost:8080`).
-3. In the URL bar of the UI, simply type the path to your file relative to the demo folder (e.g., `examples/my_folder/index.html` or just `examples/my_folder`).
-4. Bondy will read your local HTML, launch a headless browser to evaluate computed styles and interactions, and autonomously generate a JSON fix.
+For Vertex AI with the legacy ADK agent, set `GOOGLE_GENAI_USE_VERTEXAI=True`, `GOOGLE_CLOUD_PROJECT` and `GOOGLE_CLOUD_LOCATION` (see `.env.example`) and authenticate with `gcloud auth application-default login`.
 
 ## Testing & Linting
 
-### Running Tests
-We use `pytest` for all unit and integration testing.
-* **Windows / macOS / Linux**:
-  ```bash
-  uv run pytest
-  ```
-
-### Code Formatting & Pre-Commit
-Verify code compliance with formatters and linters:
-* **Windows / macOS / Linux**:
-  ```bash
-  uv run pre-commit run --all-files
-  ```
-
-### Metadata and Manifest Validation
-Validate agent configurations, types, and manifests:
-* **Windows / macOS / Linux**:
-  ```bash
-  agents-cli lint
-  ```
+```bash
+uv run pytest tests/unit                  # unit tests
+uv run pre-commit run --all-files         # ruff check + ruff format
+agents-cli lint                           # agent metadata and manifest validation (legacy)
+```
 
 ## Security
 
 All tools follow the project's security rules (`.agents/AGENTS.md`):
 
-- **Path guardrail:** only files inside `examples/` or raw HTML are audited; traversal and absolute paths are rejected (`bondy/app_utils/security.py`).
-- **SSRF guard:** remote image/page URLs must resolve to public IPs; loopback, private and metadata addresses are blocked (`validate_public_url`). The axe scanner aborts every non-local network request made by the audited page.
+- **Path guardrail:** the web UI/API only audits files inside `examples/` or raw HTML; traversal and absolute paths are rejected (`bondy/app_utils/security.py`). The CLI accepts any local path you pass it.
+- **SSRF guard:** `bondy/core/netguard.py` (`fetch_public_bytes`) is the only code path that downloads a remote URL (the image stage, the ADK vision tools and the `fetch_image.py` skill script all use it). It accepts only `http`/`https` without `user:pass@` credentials, resolves the host **once**, requires every resolved address to be public (loopback, private, link-local/metadata and reserved ranges are rejected, IPv4-mapped IPv6 included), connects to that already validated IP while keeping the original hostname for `Host`, SNI and certificate checks (so DNS rebinding between check and connect cannot reach an internal host), re-validates every redirect (at most 3) and caps the bytes read. `validate_public_url` alone is only a pre-check. The browser session aborts every network request of the audited page except `data:`, `about:` and the file being scanned.
 - **Secret redaction:** secret-looking values are replaced with `[REDACTED]` before text reaches the model, the cache or a report (best effort, not a guarantee).
 - **Untrusted output:** scanned HTML, alt text and paths are escaped in every report format (HTML, Markdown, SARIF, terminal).
-- **Write protection:** `POST /api/apply-fix` accepts only localhost, or a valid `X-API-Key` when `BONDY_API_KEY` is set, and refuses ambiguous replacements.
+- **Write protection:** `POST /api/apply-fix` accepts only localhost, or a valid `X-API-Key` when `BONDY_APPLY_TOKEN` (or the deprecated `BONDY_API_KEY`) is set, and refuses ambiguous replacements.
+- **Attack surface of the web app:** the ADK agent routes are not mounted unless `BONDY_ENABLE_AGENT_API=1`, and then they require the same token or a local client. `POST /api/audit` and `/feedback` are unauthenticated by design (local tool).
+- **API key handling:** read from the environment or `.env`, never from `bondy.toml`, never printed or cached. The web server exports only an allowlist of the `.env` to its environment (see [API key and configuration](#api-key-and-configuration)).
 
 ## Contributors
 
@@ -349,6 +391,3 @@ All tools follow the project's security rules (`.agents/AGENTS.md`):
 WebAIM. (2026). *The WebAIM million: An annual accessibility analysis of the top 1,000,000 home pages*. Center for Persons with Disabilities, Utah State University. https://webaim.org/projects/million/
 
 Demo site templates provided by [freewebsitetemplates.com](https://freewebsitetemplates.com) (used for accessibility auditing test environments).
-
----
-*Built using the Google Agent Development Kit.*

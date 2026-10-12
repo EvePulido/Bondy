@@ -14,7 +14,9 @@
 
 FROM python:3.12-slim
 
-RUN pip install --no-cache-dir uv==0.8.13
+# Same uv version as .github/workflows/ci.yml (keep both in sync).
+ARG UV_VERSION=0.11.21
+RUN pip install --no-cache-dir "uv==${UV_VERSION}"
 
 WORKDIR /code
 

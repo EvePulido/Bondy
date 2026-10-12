@@ -57,6 +57,8 @@ def start_server() -> subprocess.Popen[str]:
     ]
     env = os.environ.copy()
     env["INTEGRATION_TEST"] = "TRUE"
+    # /run_sse and /docs are ADK routes, opt-in since P0-3.
+    env["BONDY_ENABLE_AGENT_API"] = "1"
     process = subprocess.Popen(
         command,
         stdout=subprocess.PIPE,

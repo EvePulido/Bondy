@@ -15,6 +15,13 @@ it gets a fresh, isolated context of that browser with the same network guard
 and per-page timeouts, and the browser is always closed on exit (error or
 Ctrl+C included). Outside a session each ``open_page`` launches its own.
 
+Inside a session ``page_watchdog`` adds a HARD per-page limit: ``page.evaluate``
+has no timeout in Playwright, so a page stuck in a JS loop after ``load`` would
+block the scan indefinitely. When the budget expires a timer thread kills the
+Playwright driver process tree (driver + browser); the blocked call fails with
+"Connection closed", the page is reported as hung and the next page gets a
+fresh driver and browser.
+
 This module only imports Playwright lazily and never ADK / FastAPI / Gemini.
 """
 
@@ -23,6 +30,8 @@ from __future__ import annotations
 import os
 import re
 import shutil
+import signal
+import subprocess
 import tempfile
 import threading
 from collections.abc import Callable, Iterable, Iterator
@@ -39,7 +48,6 @@ DEAD_PROXY_ARGS = [
     "--proxy-bypass-list=<-loopback>",
 ]
 INSTALL_COMMAND = "python -m playwright install chromium"
-SYSTEM_CHANNELS = ("chrome", "msedge")
 
 SYSTEM_BROWSER_CANDIDATES = {
     "chrome": [
@@ -64,6 +72,10 @@ SYSTEM_BROWSER_CANDIDATES = {
 
 class BrowserUnavailableError(RuntimeError):
     """No usable Chromium-based browser could be launched."""
+
+
+class PageHungError(RuntimeError):
+    """The page in progress exceeded its hard time budget and was killed."""
 
 
 def find_system_browsers() -> dict[str, str]:
@@ -199,10 +211,66 @@ class BrowserSession:
         self._browser: Any = None
         self._error: BrowserUnavailableError | None = None
         self.launches = 0
+        # hard-watchdog state (see page_watchdog)
+        self._lock = threading.Lock()
+        self._driver_dead = False  # driver tree was killed: restart before use
+        self.page_hung = False  # the page in progress was killed by the watchdog
+        self.hung_pages = 0
+
+    def driver_pid(self) -> int | None:
+        """PID of the Playwright driver (its child is the browser).
+
+        Playwright exposes no public handle, so this reads private attributes
+        defensively; None means the watchdog cannot act (the scan then simply
+        keeps its cooperative timeouts).
+        """
+        try:
+            proc = self._pw._impl_obj._connection._transport._proc
+            return int(proc.pid)
+        except Exception:
+            return None
+
+    def kill_driver(self) -> bool:
+        """Kills the driver process tree (called from the watchdog thread)."""
+        pid = self.driver_pid()
+        if pid is None:
+            return False
+        self._driver_dead = True
+        kill_process_tree(pid)
+        return True
+
+    def begin_page(self) -> None:
+        """Forgets the hung state of the previous page."""
+        self.page_hung = False
+
+    def prepare(self) -> None:
+        """Starts the browser (if needed) so launching never counts as page time.
+
+        A failed launch is remembered by ``browser()`` and surfaces from the
+        scanners as usual; it is not raised here.
+        """
+        self.begin_page()
+        try:
+            self.browser()
+        except Exception:
+            pass
 
     def browser(self) -> Any:
         if self._error is not None:
             raise self._error
+        if self.page_hung:
+            # the remaining browser scanners of a killed page must not relaunch
+            # a browser just to hang again on the same page
+            raise PageHungError("page exceeded its time budget (browser killed)")
+        if self._driver_dead:
+            pw = self._pw
+            self._browser = self._pw = None
+            self._driver_dead = False
+            if pw is not None:
+                try:
+                    pw.stop()
+                except Exception:
+                    pass
         if self._browser is not None:
             try:
                 if self._browser.is_connected():
@@ -232,6 +300,93 @@ class BrowserSession:
                     closer()
                 except Exception:
                     pass
+
+
+def kill_process_tree(pid: int) -> None:
+    """Best effort: ``pid`` and its descendants. Never raises."""
+    try:
+        if os.name == "nt":
+            subprocess.run(
+                ["taskkill", "/F", "/T", "/PID", str(pid)],
+                capture_output=True,
+                timeout=15,
+                check=False,
+            )
+            return
+        # the browser is the driver's direct child; its own helpers exit with it
+        subprocess.run(
+            ["pkill", "-KILL", "-P", str(pid)],
+            capture_output=True,
+            timeout=15,
+            check=False,
+        )
+    except Exception:
+        pass
+    if os.name != "nt":
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except OSError:
+            pass
+
+
+class PageWatchdog:
+    """Timer armed by ``BrowserSession.page_watchdog``; ``fired`` tells the outcome."""
+
+    def __init__(self, session: BrowserSession, seconds: float):
+        self.session = session
+        self.seconds = seconds
+        self.fired = False
+        self._done = False
+        self._timer = threading.Timer(seconds, self._fire)
+        self._timer.daemon = True
+
+    def _fire(self) -> None:
+        with self.session._lock:  # held through the kill: disarm() waits for it
+            if self._done:
+                return
+            self.session.page_hung = True
+            self.fired = self.session.kill_driver()
+            if not self.fired:
+                self.session.page_hung = False
+            else:
+                self.session.hung_pages += 1
+
+    def disarm(self) -> None:
+        self._timer.cancel()
+        with self.session._lock:
+            self._done = True
+
+
+@contextmanager
+def page_watchdog(seconds: float | None = None) -> Iterator[PageWatchdog | None]:
+    """Hard limit for the page scanned inside the block (needs a session).
+
+    ``seconds`` defaults to the session's ``page_timeout``. Yields None (no
+    watchdog) outside a session or when the limit is None / 0.
+    """
+    session = _active()
+    limit = session.page_timeout if seconds is None and session else seconds
+    if session is None or not limit or limit <= 0:
+        yield None
+        return
+    session.begin_page()
+    dog = PageWatchdog(session, float(limit))
+    dog._timer.start()
+    try:
+        yield dog
+    finally:
+        dog.disarm()
+
+
+def active_session() -> BrowserSession | None:
+    """The browser session of the current scan (this thread), if any."""
+    return _active()
+
+
+def page_hung() -> bool:
+    """True when the active session's current page was killed by the watchdog."""
+    session = _active()
+    return bool(session and session.page_hung)
 
 
 # per thread: two scans in one process (library use) never share a session
@@ -327,7 +482,10 @@ def open_page(
         yield page
     finally:
         if session is not None:
-            if context is not None:
+            # A watchdog kill left no driver to answer: on Linux (CPython
+            # 3.13) ``context.close()`` then blocks forever. The session
+            # relaunches the whole browser, so the context needs no close.
+            if context is not None and not (session.page_hung or session._driver_dead):
                 try:
                     context.close()
                 except Exception:

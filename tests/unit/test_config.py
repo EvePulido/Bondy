@@ -108,22 +108,6 @@ def test_env_is_not_modified(tmp_path):
     assert env == {"BONDY_MODEL": "x"}
 
 
-def test_dotenv_does_not_override_existing_env(tmp_path, monkeypatch):
-    """The server loads .env with override=False: real env vars must win."""
-    from dotenv import load_dotenv
-
-    dotenv = tmp_path / ".env"
-    dotenv.write_text("BONDY_TEST_VAR=from-dotenv\nBONDY_TEST_NEW=new\n")
-    monkeypatch.setenv("BONDY_TEST_VAR", "from-env")
-    monkeypatch.delenv("BONDY_TEST_NEW", raising=False)
-    load_dotenv(dotenv_path=dotenv, override=False)
-    import os
-
-    assert os.environ["BONDY_TEST_VAR"] == "from-env"
-    assert os.environ["BONDY_TEST_NEW"] == "new"
-    monkeypatch.delenv("BONDY_TEST_NEW", raising=False)
-
-
 def test_server_does_not_use_dotenv_override():
     from pathlib import Path
 

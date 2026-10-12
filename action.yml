@@ -124,10 +124,33 @@ runs:
         # Do not fail here: the SARIF must be uploaded first (next steps).
         exit 0
 
-    # Pinned to the commit of release v4.38.3 (verified with `git ls-remote`
+    # The GITHUB_TOKEN of a pull request from a fork (and of Dependabot) is
+    # read-only: `upload-sarif` would fail with a permission error unrelated to
+    # the scan. In that case the report is kept as a workflow artifact instead.
+    - name: Note that SARIF upload is skipped (read-only token)
+      if: ${{ always() && inputs.upload-sarif == 'true' && inputs.format == 'sarif' && hashFiles(inputs.output) != '' && github.event_name == 'pull_request' && (github.event.pull_request.head.repo.full_name != github.repository || github.actor == 'dependabot[bot]') }}
+      shell: bash
+      run: |
+        echo "::notice title=Bondy::SARIF upload to code scanning skipped: this pull request runs with a read-only token (fork or Dependabot). The report is attached to the run as the 'bondy-sarif' artifact."
+
+    # Pinned to the commit of release v7.0.2 (verified with `git ls-remote`
     # on the official repository). Update it deliberately.
+    - name: Keep the SARIF report as an artifact (read-only token)
+      if: ${{ always() && inputs.upload-sarif == 'true' && inputs.format == 'sarif' && hashFiles(inputs.output) != '' && github.event_name == 'pull_request' && (github.event.pull_request.head.repo.full_name != github.repository || github.actor == 'dependabot[bot]') }}
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      with:
+        name: bondy-sarif
+        path: ${{ inputs.output }}
+        if-no-files-found: warn
+
+    # Pinned to the commit of release v4.38.3 (verified with `git ls-remote`
+    # on the official repository). Update it deliberately. Needs
+    # `security-events: write`, and code scanning enabled on private
+    # repositories (GitHub Advanced Security): without it the upload fails, which
+    # must not hide the scan result, hence `continue-on-error`.
     - name: Upload SARIF to code scanning
-      if: ${{ always() && inputs.upload-sarif == 'true' && inputs.format == 'sarif' && hashFiles(inputs.output) != '' }}
+      if: ${{ always() && inputs.upload-sarif == 'true' && inputs.format == 'sarif' && hashFiles(inputs.output) != '' && (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]')) }}
+      continue-on-error: true
       uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
       with:
         sarif_file: ${{ inputs.output }}

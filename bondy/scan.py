@@ -12,12 +12,18 @@ import importlib.util
 import os
 import re
 import time
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast
 
-from bondy.app_utils.browser import INSTALL_COMMAND, BrowserUnavailableError
+from bondy.app_utils.browser import (
+    INSTALL_COMMAND,
+    BrowserUnavailableError,
+    active_session,
+    page_hung,
+    page_watchdog,
+)
 from bondy.app_utils.security import validate_input_before_audit
 from bondy.core.checks import check_wcag
 from bondy.resources import SKILLS_DIR
@@ -27,6 +33,9 @@ SEVERITY_RANK = {"warning": 1, "critical": 2}
 MAX_PAGES_SKIP = "--max-pages limit reached"
 INTERRUPTED_SKIP = "interrupted by the user (Ctrl+C)"
 SCAN_TIMEOUT_SKIP = "--scan-timeout reached"
+# a page whose browser work exceeded --timeout (hung JS loop): the browser was
+# killed; the reason is followed by " (<n> s)"
+PAGE_TIMEOUT_SKIP = "page exceeded --timeout (hung page, browser killed)"
 
 Scanner = Callable[[str], list[dict]]
 
@@ -373,7 +382,7 @@ def _criteria(checks: Iterable[str]) -> set[str]:
 def run_scanners(
     html: str,
     checks: Iterable[str] = (),
-    scanners: dict[str, Scanner] | None = None,
+    scanners: Mapping[str, Scanner] | None = None,
     stats: dict[str, int] | None = None,
 ) -> tuple[list[dict], list[str], dict[str, str]]:
     """Runs every scanner on ``html``. Returns (findings, errors, unavailable).
@@ -385,11 +394,18 @@ def run_scanners(
     ``unavailable`` (name -> reason) instead, and its static fallback (if any)
     runs in its place. ``checks`` (e.g. ``["WCAG 1.1.1"]``) keeps only findings
     that map to those criteria.
+
+    When the hard page watchdog killed the browser (``page_hung()``), the
+    remaining browser scanners of the page are skipped and no per-scanner error
+    is recorded (the caller marks the whole page).
     """
     findings: list[dict] = []
     errors: list[str] = []
     unavailable: dict[str, str] = {}
+    hung = False
     for name, run in (scanners or SCANNERS).items():
+        if hung and name in BROWSER_SCANNERS:
+            continue
         try:
             found = run(html)
             findings.extend(found)
@@ -399,6 +415,9 @@ def run_scanners(
         except BrowserUnavailableError as e:
             unavailable[name] = str(e)
         except Exception as e:
+            if page_hung():
+                hung = True
+                continue
             lines = str(e).strip().splitlines()
             errors.append(f"{name}: {type(e).__name__}: {lines[0] if lines else ''}")
     for name in unavailable:
@@ -417,7 +436,7 @@ def run_scanners(
 def scan_html(
     html: str,
     checks: Iterable[str] = (),
-    scanners: dict[str, Scanner] | None = None,
+    scanners: Mapping[str, Scanner] | None = None,
 ) -> tuple[list[dict], list[str]]:
     """Like ``run_scanners`` but an unavailable browser is reported as an error."""
     findings, errors, unavailable = run_scanners(html, checks, scanners)
@@ -428,7 +447,7 @@ def scan_html(
 def scan_loaded(
     results: list[FileResult],
     checks: Iterable[str] = (),
-    scanners: dict[str, Scanner] | None = None,
+    scanners: Mapping[str, Scanner] | None = None,
     force_static: bool = False,
     deadline: float | None = None,
     on_page: Callable[[int, int, FileResult], None] | None = None,
@@ -441,6 +460,13 @@ def scan_loaded(
     ``deadline`` is a ``time.monotonic()`` instant: pages not started by then
     are marked skipped (``SCAN_TIMEOUT_SKIP``). Ctrl+C marks the page in
     progress and the rest as skipped (``INTERRUPTED_SKIP``) and returns.
+
+    Inside a ``browser_session`` each page also has a HARD budget (the
+    session's ``page_timeout``, capped by the time left until ``deadline``):
+    ``page.evaluate`` has no timeout, so a watchdog kills the browser of a page
+    stuck in a JS loop. That page is marked skipped (``PAGE_TIMEOUT_SKIP``, or
+    ``SCAN_TIMEOUT_SKIP`` when the whole-scan deadline was the limit) and the
+    scan goes on with the next page in a fresh browser.
     """
     active = dict(scanners or SCANNERS)
     # Reason the browser scanners were dropped; set on the first launch failure
@@ -462,15 +488,34 @@ def scan_loaded(
                     fb_name, fb = STATIC_FALLBACKS[n]
                     to_run[fb_name] = fb
         stats: dict[str, int] = {}
+        session = active_session()
+        if session is not None and any(n in BROWSER_SCANNERS for n in to_run):
+            session.prepare()  # (re)launching is not page time
+        limit = session.page_timeout if session else None
+        scan_bound = False
+        if deadline is not None:
+            left = max(deadline - time.monotonic(), 0.001)
+            if not limit or left < limit:
+                limit, scan_bound = left, True
         try:
-            result.findings, result.errors, unavailable = run_scanners(
-                result.html or "", checks, to_run, stats
-            )
+            with page_watchdog(limit) as dog:
+                result.findings, result.errors, unavailable = run_scanners(
+                    result.html or "", checks, to_run, stats
+                )
             result.axe_stats = stats or None
         except KeyboardInterrupt:
             for r in todo[i:]:
                 r.findings, r.errors, r.skipped = [], [], INTERRUPTED_SKIP
             return
+        if dog is not None and dog.fired:
+            # killed mid-page: nothing it produced is trustworthy or complete
+            result.findings, result.errors, result.axe_stats = [], [], None
+            result.skipped = (
+                SCAN_TIMEOUT_SKIP
+                if scan_bound
+                else f"{PAGE_TIMEOUT_SKIP} ({dog.seconds:g} s)"
+            )
+            continue
         if browser_down is None and unavailable:
             browser_down = next(iter(unavailable.values()))
         if browser_down is not None:
@@ -491,7 +536,7 @@ def scan_path(
     include: Iterable[str],
     exclude: Iterable[str],
     checks: Iterable[str] = (),
-    scanners: dict[str, Scanner] | None = None,
+    scanners: Mapping[str, Scanner] | None = None,
     force_static: bool = False,
     max_files: int | None = None,
     deadline: float | None = None,

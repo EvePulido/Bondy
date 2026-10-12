@@ -64,6 +64,7 @@ def test_counts_free_and_paid_images_and_batches(tmp_path, no_model):
     # no prices configured: tokens yes, dollars never invented
     assert est.cost_min_usd is None and est.cost_max_usd is None
     assert not est.prices_configured
+    assert est.cost_unavailable_reason is not None
     assert "price_input_per_mtok" in est.cost_unavailable_reason
 
 
@@ -129,6 +130,7 @@ def test_estimate_with_configured_prices_shows_cost_range(tmp_path, no_model):
     s = config.load_settings(flags={"api_key": "k"}, env={}, start_dir=tmp_path)
     est = estimate_scan(tmp_path, s)
     assert est.prices_configured and est.cost_unavailable_reason is None
+    assert est.cost_min_usd is not None and est.cost_max_usd is not None
     assert 0 < est.cost_min_usd < est.cost_max_usd
     text = format_estimate(est)
     assert "~$" in text and "not available" not in text
